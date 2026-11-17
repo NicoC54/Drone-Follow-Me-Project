@@ -1,0 +1,54 @@
+# Parameters of all follow-me nodes. "/**" = applies to every node; each node only reads
+# the parameters it declares. Defaults live in follow_me_core/params.hpp.
+/**:
+  ros__parameters:
+    # Gazebo camera: 640x360, horizontal FOV 77.3 deg -> fx = fy = 400 px
+    camera:
+      width: 640
+      height: 360
+      fx: 400.0
+      fy: 400.0
+      target_size: 0.5        # leader beacon diameter [m]
+      min_size_px: 3.0
+      max_range: 120.0
+      sigma_px: 1.0           # measured: 0.5 px std at rest, more when moving (sync, motion)
+      sigma_size_px: 0.5      # measured: 0.14 px std + residual bias margin
+      offset: [0.0, 0.0, -0.25]   # camera position in the follower body frame [m]
+
+    estimator:
+      q_accel: 1.5
+      gate_chi2: 16.27
+      coast_time: 0.5
+      lost_time: 3.0
+
+    guidance:
+      follow_dist: 8.0
+      height_offset: 2.0
+
+    safety:
+      d_min: 4.0
+      buffer: 3.0
+
+    control:
+      kp_pos: 0.8
+      kv: 2.5
+      ki: 0.4
+
+    follower:
+      a_max: 6.0
+      v_max: 14.0
+      wind: [2.0, -1.0, 0.0]
+
+    gimbal:
+      gain: 8.0               # must match p_gain of the gimbal joints in the world SDF
+      search_rate_deg: 40.0
+      pitch_max_deg: 40.0     # = gimbal_pitch joint upper limit in the SDF (airframe out of view)
+
+    # Detector calibration: the raw enclosing-circle diameter is ~0.3 px too large
+    # (anti-aliased edges). Measured against the ground truth, see docs/UNDERSTANDING_ROS.md.
+    size_bias_px: 0.3
+
+    # Fault injection in the detector (0 = pure vision). Try p_outlier: 0.02 to test gating.
+    inject:
+      p_miss: 0.0
+      p_outlier: 0.0
