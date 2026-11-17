@@ -1,0 +1,315 @@
+<?xml version="1.0" ?>
+<!--
+  Follow-me world.
+  - leader  : kinematic drone (VelocityControl), red spherical beacon of 0.5 m = known size W.
+  - follower: real quadrotor (gravity on, 1.5 kg) flown by the FlightController plugin
+    (follow_me_flight_controller): simulated IMU/GNSS/baro/mag -> navigation ESKF ->
+    attitude/rate control -> motor model -> forces applied to the rigid body, every physics
+    step. Gazebo integrates the 6-DOF dynamics. 2-axis gimbal + 640x360 camera.
+  OdometryPublisher gives the ground truth of both drones (for the monitor only).
+-->
+<sdf version="1.9">
+  <world name="follow_me">
+    <physics name="2ms" type="ignored">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <scene>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <background>0.62 0.75 0.88 1</background>
+      <sky/>
+      <grid>false</grid>
+    </scene>
+
+    <gui fullscreen="0">
+      <plugin filename="MinimalScene" name="3D View">
+        <gz-gui>
+          <title>3D View</title>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="string" key="state">docked</property>
+        </gz-gui>
+        <engine>ogre2</engine>
+        <scene>scene</scene>
+        <ambient_light>0.5 0.5 0.5</ambient_light>
+        <background_color>0.62 0.75 0.88</background_color>
+        <camera_pose>-35 -30 35 0 0.45 0.7</camera_pose>
+      </plugin>
+      <plugin filename="GzSceneManager" name="Scene Manager">
+        <gz-gui>
+          <property key="resizable" type="bool">false</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="state" type="string">floating</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+      <plugin filename="InteractiveViewControl" name="Interactive view control">
+        <gz-gui>
+          <property key="resizable" type="bool">false</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="state" type="string">floating</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+      <plugin filename="CameraTracking" name="Camera Tracking">
+        <gz-gui>
+          <property key="resizable" type="bool">false</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="state" type="string">floating</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+      <plugin filename="WorldControl" name="World control">
+        <gz-gui>
+          <title>World control</title>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="bool" key="resizable">false</property>
+          <property type="double" key="height">72</property>
+          <property type="double" key="width">121</property>
+          <property type="double" key="z">1</property>
+          <property type="string" key="state">floating</property>
+          <anchors target="3D View">
+            <line own="left" target="left"/>
+            <line own="bottom" target="bottom"/>
+          </anchors>
+        </gz-gui>
+        <play_pause>true</play_pause>
+        <step>true</step>
+        <start_paused>false</start_paused>
+      </plugin>
+      <plugin filename="WorldStats" name="World stats">
+        <gz-gui>
+          <title>World stats</title>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="bool" key="resizable">false</property>
+          <property type="double" key="height">110</property>
+          <property type="double" key="width">290</property>
+          <property type="double" key="z">1</property>
+          <property type="string" key="state">floating</property>
+          <anchors target="3D View">
+            <line own="right" target="right"/>
+            <line own="bottom" target="bottom"/>
+          </anchors>
+        </gz-gui>
+        <sim_time>true</sim_time>
+        <real_time>true</real_time>
+        <real_time_factor>true</real_time_factor>
+        <iterations>true</iterations>
+      </plugin>
+      <plugin filename="ImageDisplay" name="Follower camera (detector view)">
+        <gz-gui>
+          <title>Follower camera (detector view)</title>
+          <property type="string" key="state">docked</property>
+        </gz-gui>
+        <topic>/follower/detector/debug_image</topic>
+        <topic_picker>true</topic_picker>
+      </plugin>
+      <plugin filename="EntityTree" name="Entity tree"/>
+    </gui>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 50 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <!-- Ground and a few landmarks (no red anywhere: red is reserved for the leader beacon) -->
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>800 800</size></plane></geometry>
+          <material><ambient>0.35 0.45 0.3 1</ambient><diffuse>0.35 0.45 0.3 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="runway">
+      <static>true</static>
+      <pose>20 90 0.02 0 0 1.3</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>220 12 0.02</size></box></geometry>
+          <material><ambient>0.3 0.3 0.32 1</ambient><diffuse>0.3 0.3 0.32 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="tower_a">
+      <static>true</static>
+      <pose>40 20 6 0 0 0</pose>
+      <link name="link"><visual name="v"><geometry><box><size>6 6 12</size></box></geometry>
+        <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material></visual></link>
+    </model>
+    <model name="tower_b">
+      <static>true</static>
+      <pose>-30 110 5 0 0 0</pose>
+      <link name="link"><visual name="v"><geometry><box><size>8 8 10</size></box></geometry>
+        <material><ambient>0.25 0.35 0.7 1</ambient><diffuse>0.25 0.35 0.7 1</diffuse></material></visual></link>
+    </model>
+    <model name="tower_c">
+      <static>true</static>
+      <pose>30 170 7 0 0 0</pose>
+      <link name="link"><visual name="v"><geometry><cylinder><radius>4</radius><length>14</length></cylinder></geometry>
+        <material><ambient>0.85 0.75 0.3 1</ambient><diffuse>0.85 0.75 0.3 1</diffuse></material></visual></link>
+    </model>
+
+    <!-- ===================== LEADER ===================== -->
+    <model name="leader">
+      <pose>0 0 20 0 0 0</pose>
+      <link name="base_link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.02</ixx><iyy>0.02</iyy><izz>0.04</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="beacon">
+          <geometry><sphere><radius>0.25</radius></sphere></geometry>
+          <material><ambient>1 0 0 1</ambient><diffuse>1 0 0 1</diffuse><emissive>0.7 0 0 1</emissive></material>
+        </visual>
+        <visual name="arm_1"><pose>0.28 0.28 0 0 0 0.785</pose><geometry><box><size>0.4 0.03 0.03</size></box></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
+        <visual name="arm_2"><pose>-0.28 0.28 0 0 0 -0.785</pose><geometry><box><size>0.4 0.03 0.03</size></box></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
+        <visual name="arm_3"><pose>-0.28 -0.28 0 0 0 0.785</pose><geometry><box><size>0.4 0.03 0.03</size></box></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
+        <visual name="arm_4"><pose>0.28 -0.28 0 0 0 -0.785</pose><geometry><box><size>0.4 0.03 0.03</size></box></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
+        <visual name="rotor_1"><pose>0.42 0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
+        <visual name="rotor_2"><pose>-0.42 0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
+        <visual name="rotor_3"><pose>-0.42 -0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
+        <visual name="rotor_4"><pose>0.42 -0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
+      </link>
+      <!-- Twist in BODY frame: linear.x = forward speed, linear.z = climb, angular.z = turn rate -->
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <topic>/model/leader/cmd_vel</topic>
+      </plugin>
+      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+        <odom_frame>world</odom_frame>
+        <robot_base_frame>leader</robot_base_frame>
+        <odom_topic>/model/leader/odometry</odom_topic>
+        <dimensions>3</dimensions>
+        <odom_publish_frequency>50</odom_publish_frequency>
+      </plugin>
+    </model>
+
+    <!-- ===================== FOLLOWER ===================== -->
+    <model name="follower">
+      <pose>-12 -5 18 0 0 0</pose>
+      <link name="base_link">
+        <!-- 1.4 kg + 2 x 0.05 kg gimbal = 1.5 kg = QuadrotorParams.mass; inertia = QuadrotorParams -->
+        <inertial>
+          <mass>1.4</mass>
+          <inertia><ixx>0.029</ixx><iyy>0.029</iyy><izz>0.055</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="body"><geometry><box><size>0.3 0.3 0.08</size></box></geometry>
+          <material><ambient>0.1 0.3 0.9 1</ambient><diffuse>0.1 0.3 0.9 1</diffuse></material></visual>
+        <visual name="arm_1"><pose>0.22 0.22 0 0 0 0.785</pose><geometry><box><size>0.42 0.03 0.03</size></box></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material></visual>
+        <visual name="arm_2"><pose>-0.22 0.22 0 0 0 -0.785</pose><geometry><box><size>0.42 0.03 0.03</size></box></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material></visual>
+        <visual name="arm_3"><pose>-0.22 -0.22 0 0 0 0.785</pose><geometry><box><size>0.42 0.03 0.03</size></box></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material></visual>
+        <visual name="arm_4"><pose>0.22 -0.22 0 0 0 -0.785</pose><geometry><box><size>0.42 0.03 0.03</size></box></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material></visual>
+        <visual name="rotor_1"><pose>0.37 0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
+        <visual name="rotor_2"><pose>-0.37 0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
+        <visual name="rotor_3"><pose>-0.37 -0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
+        <visual name="rotor_4"><pose>0.37 -0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
+          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
+      </link>
+
+      <!-- Gimbal: yaw joint (z) then pitch joint (axis -y, so positive = camera looks UP) -->
+      <!-- Gimbal hangs 25 cm below the body: the airframe cannot hide the target for normal tilts -->
+      <link name="gimbal_yaw_link">
+        <pose>0 0 -0.25 0 0 0</pose>
+        <inertial><mass>0.05</mass>
+          <inertia><ixx>1e-4</ixx><iyy>1e-4</iyy><izz>1e-4</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="v"><pose>0 0 0.12 0 0 0</pose><geometry><cylinder><radius>0.015</radius><length>0.2</length></cylinder></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
+      </link>
+      <joint name="gimbal_yaw" type="revolute">
+        <parent>base_link</parent>
+        <child>gimbal_yaw_link</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper><effort>1e6</effort></limit></axis>
+      </joint>
+
+      <link name="camera_link">
+        <pose>0 0 -0.25 0 0 0</pose>
+        <inertial><mass>0.05</mass>
+          <inertia><ixx>1e-4</ixx><iyy>1e-4</iyy><izz>1e-4</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <!-- small enough to stay inside the camera near clip plane -->
+        <visual name="v"><geometry><box><size>0.06 0.05 0.05</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse></material></visual>
+        <!-- 640x360, fx = 320 / tan(hfov/2) = 400 px  (same 77 deg FOV as the Python model) -->
+        <sensor name="camera" type="camera">
+          <always_on>1</always_on>
+          <update_rate>30</update_rate>
+          <topic>/follower/camera/image</topic>
+          <camera>
+            <horizontal_fov>1.349482</horizontal_fov>
+            <image><width>640</width><height>360</height><format>R8G8B8</format></image>
+            <clip><near>0.1</near><far>300</far></clip>
+          </camera>
+        </sensor>
+      </link>
+      <joint name="gimbal_pitch" type="revolute">
+        <parent>gimbal_yaw_link</parent>
+        <child>camera_link</child>
+        <axis><xyz>0 -1 0</xyz><limit><lower>-1.5708</lower><upper>0.6981</upper><effort>1e6</effort></limit></axis>
+      </joint>
+
+      <!-- Flight controller "firmware": navigation + attitude/rate control + motors (our C++) -->
+      <plugin filename="follow_me_flight_controller" name="follow_me_gazebo::FlightController">
+        <link_name>base_link</link_name>
+        <setpoint_topic>/model/follower/fc/setpoint</setpoint_topic>
+        <nav_topic>/model/follower/nav/odometry</nav_topic>
+        <status_topic>/model/follower/fc/status</status_topic>
+        <setpoint_timeout>0.5</setpoint_timeout>
+        <seed>42</seed>
+      </plugin>
+      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+        <odom_frame>world</odom_frame>
+        <robot_base_frame>follower_truth</robot_base_frame>
+        <odom_topic>/model/follower/odometry</odom_topic>
+        <dimensions>3</dimensions>
+        <odom_publish_frequency>100</odom_publish_frequency>
+      </plugin>
+      <!-- Gimbal motors: P control on angle, output = joint velocity, saturated at 120 deg/s -->
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>gimbal_yaw</joint_name>
+        <topic>/model/follower/gimbal/yaw_cmd</topic>
+        <use_velocity_commands>true</use_velocity_commands>
+        <p_gain>8</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <cmd_max>2.094</cmd_max><cmd_min>-2.094</cmd_min>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>gimbal_pitch</joint_name>
+        <topic>/model/follower/gimbal/pitch_cmd</topic>
+        <use_velocity_commands>true</use_velocity_commands>
+        <p_gain>8</p_gain><i_gain>0</i_gain><d_gain>0</d_gain>
+        <cmd_max>2.094</cmd_max><cmd_min>-2.094</cmd_min>
+      </plugin>
+      <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+        <topic>/model/follower/joint_state</topic>
+      </plugin>
+    </model>
+  </world>
+</sdf>

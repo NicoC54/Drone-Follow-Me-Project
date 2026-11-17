@@ -1,0 +1,68 @@
+# ros_gz_bridge: which Gazebo topics are exposed in ROS 2, and in which direction.
+- ros_topic_name: /clock
+  gz_topic_name: /clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: gz.msgs.Clock
+  direction: GZ_TO_ROS
+
+# --- commands (ROS -> Gazebo) ---
+- ros_topic_name: /leader/cmd_vel
+  gz_topic_name: /model/leader/cmd_vel
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: gz.msgs.Twist
+  direction: ROS_TO_GZ
+# Setpoint for the follower's flight controller (plugin): linear = desired acceleration
+# (world ENU, m/s^2), angular.z = desired yaw (rad).
+- ros_topic_name: /follower/fc/accel_yaw_setpoint
+  gz_topic_name: /model/follower/fc/setpoint
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: gz.msgs.Twist
+  direction: ROS_TO_GZ
+- ros_topic_name: /follower/gimbal/yaw_cmd
+  gz_topic_name: /model/follower/gimbal/yaw_cmd
+  ros_type_name: std_msgs/msg/Float64
+  gz_type_name: gz.msgs.Double
+  direction: ROS_TO_GZ
+- ros_topic_name: /follower/gimbal/pitch_cmd
+  gz_topic_name: /model/follower/gimbal/pitch_cmd
+  ros_type_name: std_msgs/msg/Float64
+  gz_type_name: gz.msgs.Double
+  direction: ROS_TO_GZ
+
+# --- state and sensors (Gazebo -> ROS) ---
+- ros_topic_name: /leader/odom_truth        # ground truth: only the monitor may use it
+  gz_topic_name: /model/leader/odometry
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS
+- ros_topic_name: /follower/odom            # follower's NAVIGATION estimate (ESKF) + covariance
+  gz_topic_name: /model/follower/nav/odometry
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.OdometryWithCovariance
+  direction: GZ_TO_ROS
+- ros_topic_name: /follower/odom_truth      # ground truth: only the monitor may use it
+  gz_topic_name: /model/follower/odometry
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS
+- ros_topic_name: /follower/fc/status       # [tilt_deg, thrust_N, saturated, w0, w1, w2, w3]
+  gz_topic_name: /model/follower/fc/status
+  ros_type_name: ros_gz_interfaces/msg/Float32Array
+  gz_type_name: gz.msgs.Float_V
+  direction: GZ_TO_ROS
+- ros_topic_name: /follower/joint_states    # measured gimbal angles
+  gz_topic_name: /model/follower/joint_state
+  ros_type_name: sensor_msgs/msg/JointState
+  gz_type_name: gz.msgs.Model
+  direction: GZ_TO_ROS
+- ros_topic_name: /follower/camera/image
+  gz_topic_name: /follower/camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+# The annotated detector image goes back to Gazebo so it shows in the GUI panel.
+- ros_topic_name: /follower/detector/debug_image
+  gz_topic_name: /follower/detector/debug_image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: ROS_TO_GZ
