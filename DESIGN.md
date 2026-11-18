@@ -162,6 +162,58 @@ Fixes: camera 25 cm below the body, gimbal up-tilt <= 40 deg; detector flags tru
 (fill ratio < 0.75 or touching the image border); tracker then fuses (u, v) only (2-dof gate)
 and never starts a track on it. Result: minimum distance 6.42-6.48 m over 3 runs (GUI included).
 
+## Phase 4: unknown drone, ground radar, PIP and camera hand-over (2026-11-17, core done)
+
+### D24. Architecture change: radar-cued interception, then vision follow
+The red beacon of known size (H2) is dropped: the target is an arbitrary drone. A ground
+surveillance radar detects it at ~500 m; the follower flies to the predicted intercept point
+(PIP) of the target's standoff point, then hands over to its camera and follows below the target
+(silhouette against the sky, no colour cue).
+
+### D25. Raw radar plots, own-ship echo, track start
+The radar sends plots (range, az, el, range rate; 2 Hz; 0.3 s latency; Pd 0.9; Poisson clutter),
+including the follower's own echo. Association: nearest neighbour between two known objects (own
+position from the navigation, target from the EKF), chi2 gates. Track start: two compatible plots
+on consecutive scans, initial velocity from their difference.
+
+### D26. Exact out-of-sequence fusion by replay
+3 s of measurements + a filter snapshot after each; a late measurement restores the snapshot
+before its stamp, then re-fuses everything after it. Unit test: arrival order == capture order to
+1e-9. Replaces "drop older than the filter time" (TimedTracker) for the two-sensor case.
+
+### D27. Unknown size learnt online
+Camera = bearing only until W is known: W = s * z / f with z the radar plot DEPTH in the camera
+frame (first version used the radar range: W = 13 m instead of 0.6 m, caught by a test), radar
+uncertainty projected on the camera axis, scalar Kalman filter with a small random walk. Then the
+camera is a full [u, v, s] measurement again (range to the decimetre at short distance).
+
+### D28. Mission state machine and PIP guidance
+WAIT -> MIDCOURSE (PIP at 12 m/s) -> HANDOVER (< 80 m, slow, gimbal cued by the radar, never
+closer than 25 m without camera lock) -> FOLLOW (camera locked: 5 consecutive updates); back to
+HANDOVER if the camera is lost for 3 s, LOST without track. PIP: smallest positive root of
+(|v|^2 - V^2) tau^2 + 2 (r.v) tau + |r|^2 = 0, pure pursuit if none. Offline results (8 seeds):
+track at 1.3 s, FOLLOW at ~23 s from ~480 m, min distance 6.1-6.5 m, size within 5 %.
+Gazebo/ROS integration: see D29-D31.
+
+### D29. ROS/Gazebo integration of phase 4
+intercept.launch.py + intercept.sdf (grey quadrotor leader, no beacon, ~480 m away; radar mast)
++ intercept.yaml on top of follow_me.yaml. radar_node simulates the ground radar from the ground
+truth (Gazebo has no radar) and delays scans by the datalink latency; fusion_node runs the
+FusionTracker and publishes a region of interest; detector_node "silhouette" mode finds a dark
+blob against the sky inside it; intercept_node runs the mission. Phase 3 stays untouched.
+
+### D30. Tentative tracks + resolution-aware apparent size
+Gazebo showed (1) a wrong initial track from two coincident plots -> tentative track confirmed by
+3 radar hits; (2) the apparent size of an unknown drone depends on the range (thin arms below one
+pixel, body and rotors split into blobs, the detector kept the central one): the size learnt at
+80 m was half the close-range one, the camera then pulled the estimate, the radar got gated out.
+Fix: merge neighbouring blobs; learn W and use the camera range only for targets >= 10 px.
+
+### D31. Hand-over criterion and aspect noise
+Hand-over complete = camera locked AND size known to 8 % (locking at 80 m with radar-only range
+gave a 4.38 m minimum distance -> 6.38 m). 10 % relative noise on the silhouette size (rotating X
+shape). Open issue: target NEES ~27 and 1.3-1.9 m follow error in Gazebo vs 0.2-0.6 m offline.
+
 ## Next steps (ideas)
 - Noisy follower self-state (GNSS/INS), and camera mounted on a body with real attitude.
 - Leader acceleration in the state (CA model) or IMM CV/coordinated-turn.
