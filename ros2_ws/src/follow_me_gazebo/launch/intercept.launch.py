@@ -31,6 +31,7 @@ def generate_launch_description():
 
     gui = LaunchConfiguration("gui")
     rviz = LaunchConfiguration("rviz")
+    foxglove = LaunchConfiguration("foxglove")
     common = [params, params_intercept, {"use_sim_time": True}]
     inject = {"inject.p_miss": LaunchConfiguration("p_miss"),
               "inject.p_outlier": LaunchConfiguration("p_outlier"),
@@ -67,6 +68,8 @@ def generate_launch_description():
         plugin_path,
         DeclareLaunchArgument("gui", default_value="true", description="Gazebo GUI"),
         DeclareLaunchArgument("rviz", default_value="true", description="Start RViz2"),
+        DeclareLaunchArgument("foxglove", default_value="false",
+                              description="Start foxglove_bridge (ws://localhost:8765; apt install ros-jazzy-foxglove-bridge)"),
         DeclareLaunchArgument("p_miss", default_value="0.0", description="Injected miss probability"),
         DeclareLaunchArgument("p_outlier", default_value="0.0", description="Injected false detection probability"),
         DeclareLaunchArgument("latency_ms", default_value="0", description="Injected detector processing delay [ms]"),
@@ -78,6 +81,10 @@ def generate_launch_description():
         node("fusion_node"),
         node("intercept_node"),
         node("monitor_node"),
+        node("hud_node"),
+        # Foxglove Studio: open ws://localhost:8765 and import docs/foxglove/follow_me_layout.json
+        Node(package="foxglove_bridge", executable="foxglove_bridge", name="foxglove_bridge",
+             parameters=[{"use_sim_time": True, "port": 8765}], condition=IfCondition(foxglove), output="log"),
         Node(package="rviz2", executable="rviz2", arguments=["-d", rviz_cfg],
              parameters=[{"use_sim_time": True}], condition=IfCondition(rviz), output="log"),
         follow_cam,

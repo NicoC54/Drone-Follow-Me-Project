@@ -60,9 +60,10 @@
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
   direction: GZ_TO_ROS
-# The annotated detector image goes back to Gazebo so it shows in the GUI panel.
-- ros_topic_name: /follower/detector/debug_image
-  gz_topic_name: /follower/detector/debug_image
+# The camera HUD (detector image + track, phase, range: hud_node) goes back to Gazebo so it
+# shows in the GUI panel.
+- ros_topic_name: /follower/hud_image
+  gz_topic_name: /follower/hud_image
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
   direction: ROS_TO_GZ

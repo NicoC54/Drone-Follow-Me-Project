@@ -198,6 +198,7 @@ class DetectorNode : public rclcpp::Node {
     // 4. Debug image: what the detector saw.
     if (pub_dbg_->get_subscription_count() > 0 || pub_dbg_->get_intra_process_subscription_count() > 0) {
       cv::Mat dbg = rgb.clone();
+      const int text_y = static_cast<int>(50 * rgb.cols / 640.0);  // below the HUD top band (hud_node)
       if (roi_rect.area() > 0) cv::rectangle(dbg, roi_rect, {255, 220, 0}, 1);  // cued window
       if (det.detected) {
         const cv::Scalar col = det.injected_outlier ? cv::Scalar(255, 0, 255) : cv::Scalar(0, 255, 0);
@@ -207,9 +208,9 @@ class DetectorNode : public rclcpp::Node {
         std::snprintf(txt, sizeof(txt), "%s u=%.0f v=%.0f s=%.1fpx%s",
                       det.injected_outlier ? "OUTLIER" : "det", det.u, det.v, det.size,
                       det.size_valid ? "" : " TRUNCATED (bearing only)");
-        cv::putText(dbg, txt, {8, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
+        cv::putText(dbg, txt, {8, text_y}, cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
       } else {
-        cv::putText(dbg, "no detection", {8, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 0}, 1);
+        cv::putText(dbg, "no detection", {8, text_y}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 0}, 1);
       }
       cv::drawMarker(dbg, {rgb.cols / 2, rgb.rows / 2}, {255, 255, 255}, cv::MARKER_CROSS, 12, 1);
       pub_dbg_->publish(*cv_bridge::CvImage(msg->header, "rgb8", dbg).toImageMsg());
