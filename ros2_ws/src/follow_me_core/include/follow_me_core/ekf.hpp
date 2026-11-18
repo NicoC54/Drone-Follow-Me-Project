@@ -39,6 +39,21 @@ class TargetEkf {
   // Kalman update, Joseph form (keeps P symmetric positive).
   void update(const Innovation& in, const Mat3& R_meas);
 
+  // Generic update for any measurement size M (radar: M = 4). Returns the NIS; the state is
+  // updated only if NIS <= gate (chi2 test).
+  template <int M>
+  double updateGeneric(const Eigen::Matrix<double, M, 1>& y, const Eigen::Matrix<double, M, 6>& H,
+                       const Eigen::Matrix<double, M, M>& R, double gate) {
+    const Eigen::Matrix<double, M, M> S = H * P_ * H.transpose() + R;
+    const double nis = y.dot(S.ldlt().solve(y));
+    if (nis > gate) return nis;
+    const Eigen::Matrix<double, 6, M> K = P_ * H.transpose() * S.inverse();
+    x_ += K * y;
+    const Mat6 IKH = Mat6::Identity() - K * H;
+    P_ = IKH * P_ * IKH.transpose() + K * R * K.transpose();
+    return nis;
+  }
+
   const Vec6& x() const { return x_; }
   const Mat6& P() const { return P_; }
   Vec3 position() const { return x_.head<3>(); }
