@@ -9,3 +9,8 @@ geometry_msgs/Point position
 geometry_msgs/Vector3 velocity
 float64[36] covariance      # 6x6 row-major covariance of [px py pz vx vy vz]
 float64 last_nis            # normalised innovation squared of the last measurement
+
+# Phase 4 (radar + camera fusion)
+bool camera_locked          # camera updates accepted continuously (hand-over done)
+float64 target_size         # learnt target size [m] (0 if not estimated)
+float64 target_size_sigma   # [m]
