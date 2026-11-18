@@ -1,14 +1,22 @@
-// detector_node: finds the leader's red beacon in the REAL rendered camera image (OpenCV).
-// Measurement z = [u, v, size] = centre and diameter of the enclosing circle of red pixels.
-// Optional fault injection (missed / false detections) to exercise the tracker's robustness.
+// detector_node: finds the leader in the REAL rendered camera image (OpenCV). Two modes:
+//  - "color"      (phases 2-3): red beacon of known size; z = [u, v, size] = centre and
+//                 diameter of the enclosing circle of red pixels.
+//  - "silhouette" (phase 4): unknown drone, no beacon. The tracker sends a region of interest
+//                 (/follower/detector/roi, "cueing" by the radar track); inside it, the drone is
+//                 a DARK blob against the bright sky. z = [u, v, size] = bounding-box centre and
+//                 largest side (same convention as the size W learnt by the tracker).
+// Optional fault injection (missed / false detections, latency) to exercise the tracker.
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/imgproc.hpp>
 #include <deque>
+#include <optional>
+#include <string>
 #include <random>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
 #include "follow_me_msgs/msg/detection.hpp"
+#include "follow_me_msgs/msg/roi.hpp"
 
 class DetectorNode : public rclcpp::Node {
  public:
@@ -25,6 +33,11 @@ class DetectorNode : public rclcpp::Node {
     hue_max_ = declare_parameter("hsv.hue_max", 10);
     size_bias_px_ = declare_parameter("size_bias_px", 0.0);  // detector calibration [px]
     fill_min_ = declare_parameter("fill_min", 0.75);  // red pixels / circle area below this: truncated
+    mode_ = declare_parameter("mode", std::string("color"));
+    dark_ratio_ = declare_parameter("silhouette.dark_ratio", 0.65);  // darker than 65 % of the sky
+    roi_timeout_ = declare_parameter("silhouette.roi_timeout", 0.5);
+    sub_roi_ = create_subscription<follow_me_msgs::msg::Roi>(
+        "/follower/detector/roi", 5, [this](const follow_me_msgs::msg::Roi& r) { roi_ = r; });
 
     pub_det_ = create_publisher<follow_me_msgs::msg::Detection>("/follower/detection", 10);
     pub_dbg_ = create_publisher<sensor_msgs::msg::Image>("/follower/detector/debug_image", 5);
@@ -47,7 +60,19 @@ class DetectorNode : public rclcpp::Node {
       return;
     }
     const cv::Mat& rgb = cv->image;
+    follow_me_msgs::msg::Detection det;
+    det.header = msg->header;
+    cv::Rect roi_rect;
+    if (mode_ == "silhouette") {
+      roi_rect = detectSilhouette(rgb, msg->header.stamp, det);
+    } else {
+      detectColor(rgb, det);
+    }
+    finish(rgb, msg, det, roi_rect);
+  }
 
+  // ---------------- phase 2-3: red beacon ----------------
+  void detectColor(const cv::Mat& rgb, follow_me_msgs::msg::Detection& det) {
     // 1. Colour segmentation in HSV (red wraps around hue 0).
     cv::Mat hsv, m1, m2, mask;
     cv::cvtColor(rgb, hsv, cv::COLOR_RGB2HSV);
@@ -56,9 +81,6 @@ class DetectorNode : public rclcpp::Node {
     mask = m1 | m2;
     std::vector<cv::Point> pts;
     cv::findNonZero(mask, pts);
-
-    follow_me_msgs::msg::Detection det;
-    det.header = msg->header;
     cv::Point2f c;
     float r = 0.f;
     // 2. Enclosing circle of all red pixels: robust to the thin arms crossing the beacon.
@@ -79,6 +101,84 @@ class DetectorNode : public rclcpp::Node {
       const bool on_border = c.x - r < 1 || c.y - r < 1 || c.x + r > rgb.cols - 2 || c.y + r > rgb.rows - 2;
       det.size_valid = !on_border && (r < 3.0f || fill >= fill_min_);
     }
+  }
+
+  // ---------------- phase 4: dark silhouette against the sky, inside the cued window ----------
+  cv::Rect detectSilhouette(const cv::Mat& rgb, const builtin_interfaces::msg::Time& stamp,
+                            follow_me_msgs::msg::Detection& det) {
+    if (!roi_ || !roi_->valid ||
+        (rclcpp::Time(stamp) - rclcpp::Time(roi_->header.stamp)).seconds() > roi_timeout_)
+      return {};  // no cue: we do not search the whole image (no colour to rely on)
+    const int h = static_cast<int>(roi_->half_size);
+    const cv::Rect r = cv::Rect(static_cast<int>(roi_->u) - h, static_cast<int>(roi_->v) - h, 2 * h, 2 * h) &
+                       cv::Rect(0, 0, rgb.cols, rgb.rows);
+    if (r.width < 5 || r.height < 5) return {};
+    cv::Mat gray;
+    cv::cvtColor(rgb(r), gray, cv::COLOR_RGB2GRAY);
+    // Sky brightness = 75th percentile of the window (robust to the drone itself).
+    int hist[256] = {0};
+    for (int y = 0; y < gray.rows; ++y)
+      for (int x = 0; x < gray.cols; ++x) ++hist[gray.at<uint8_t>(y, x)];
+    int acc = 0, bg = 255;
+    for (int i = 0; i < 256; ++i)
+      if ((acc += hist[i]) >= 0.75 * gray.total()) { bg = i; break; }
+    cv::Mat mask = gray < dark_ratio_ * bg;
+    cv::Mat labels, stats, centroids;
+    const int n = cv::connectedComponentsWithStats(mask, labels, stats, centroids, 8);
+    // Keep the blob closest to the cue centre that does not touch the window border (a blob
+    // touching it is the ground / horizon, or a truncated target)...
+    auto box = [&](int i) {
+      return cv::Rect(stats.at<int>(i, cv::CC_STAT_LEFT), stats.at<int>(i, cv::CC_STAT_TOP),
+                      stats.at<int>(i, cv::CC_STAT_WIDTH), stats.at<int>(i, cv::CC_STAT_HEIGHT));
+    };
+    auto usable = [&](int i) {
+      const cv::Rect b = box(i);
+      const int area = stats.at<int>(i, cv::CC_STAT_AREA);
+      return area >= 1 && area <= 0.5 * gray.total() && b.x > 0 && b.y > 0 &&
+             b.x + b.width < gray.cols && b.y + b.height < gray.rows;
+    };
+    int best = -1;
+    double best_d = 1e9;
+    for (int i = 1; i < n; ++i) {
+      if (!usable(i) || stats.at<int>(i, cv::CC_STAT_AREA) < 2) continue;
+      const cv::Rect b = box(i);
+      const double d = std::hypot(b.x + b.width / 2.0 - (roi_->u - r.x), b.y + b.height / 2.0 - (roi_->v - r.y));
+      if (d < best_d) {
+        best_d = d;
+        best = i;
+      }
+    }
+    if (best < 0) return r;
+    // ...then grow it with the nearby blobs: an unknown drone is NOT one blob (body and rotors
+    // separate as soon as the thin arms fall below one pixel). Measuring only the central blob
+    // made the apparent size depend on the range (Gazebo phase 4).
+    cv::Rect merged = box(best);
+    std::vector<bool> used(n, false);
+    used[best] = true;
+    for (bool grew = true; grew;) {
+      grew = false;
+      const int gap = std::max(3, static_cast<int>(0.6 * std::max(merged.width, merged.height)));
+      const cv::Rect zone(merged.x - gap, merged.y - gap, merged.width + 2 * gap, merged.height + 2 * gap);
+      for (int i = 1; i < n; ++i) {
+        if (used[i] || !usable(i) || (box(i) & zone).area() == 0) continue;
+        merged |= box(i);
+        used[i] = true;
+        grew = true;
+      }
+    }
+    const int x = merged.x, y = merged.y, w = merged.width, hh = merged.height;
+    det.detected = true;
+    det.u = r.x + x + w / 2.0;  // pixel i spans [i, i+1): the box centre is already continuous
+    det.v = r.y + y + hh / 2.0;
+    det.size = std::max(w, hh);
+    const bool on_image_border = r.x + x <= 1 || r.y + y <= 1 || r.x + x + w >= rgb.cols - 1 ||
+                                 r.y + y + hh >= rgb.rows - 1;
+    det.size_valid = !on_image_border;
+    return r;
+  }
+
+  void finish(const cv::Mat& rgb, const sensor_msgs::msg::Image::ConstSharedPtr& msg,
+              follow_me_msgs::msg::Detection& det, const cv::Rect& roi_rect) {
     // 3. Fault injection.
     if (det.detected && uni_(rng_) < p_miss_) det.detected = false;
     if (uni_(rng_) < p_outlier_) {
@@ -98,6 +198,7 @@ class DetectorNode : public rclcpp::Node {
     // 4. Debug image: what the detector saw.
     if (pub_dbg_->get_subscription_count() > 0 || pub_dbg_->get_intra_process_subscription_count() > 0) {
       cv::Mat dbg = rgb.clone();
+      if (roi_rect.area() > 0) cv::rectangle(dbg, roi_rect, {255, 220, 0}, 1);  // cued window
       if (det.detected) {
         const cv::Scalar col = det.injected_outlier ? cv::Scalar(255, 0, 255) : cv::Scalar(0, 255, 0);
         cv::circle(dbg, {static_cast<int>(det.u), static_cast<int>(det.v)},
@@ -127,7 +228,10 @@ class DetectorNode : public rclcpp::Node {
 
   std::deque<follow_me_msgs::msg::Detection> delayed_;
   rclcpp::TimerBase::SharedPtr release_timer_;
-  double p_miss_, p_outlier_, size_bias_px_, fill_min_;
+  double p_miss_, p_outlier_, size_bias_px_, fill_min_, dark_ratio_, roi_timeout_;
+  std::string mode_;
+  std::optional<follow_me_msgs::msg::Roi> roi_;
+  rclcpp::Subscription<follow_me_msgs::msg::Roi>::SharedPtr sub_roi_;
   int min_pixels_, sat_min_, val_min_, hue_max_, latency_ms_;
   std::mt19937_64 rng_;
   std::uniform_real_distribution<double> uni_{0.0, 1.0};
