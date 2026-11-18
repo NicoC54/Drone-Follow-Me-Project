@@ -15,6 +15,14 @@ Visualization Manager:
       Color: 160; 160; 164
       Alpha: 0.4
       Value: true
+    - Class: rviz_default_plugins/TF
+      Name: TF (drone frames)
+      Enabled: true
+      Marker Scale: 2
+      Show Arrows: false
+      Show Axes: true
+      Show Names: true
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
       Name: Truth (monitor)
       Enabled: true
@@ -48,6 +56,17 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Ground radar plots (phase 4)
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Value: /radar/markers
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Value: true
     - Class: rviz_default_plugins/Image
       Name: Detector view
       Enabled: true
@@ -72,18 +91,45 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/Orbit
-      Name: Current View
-      Distance: 40
+      # The camera follows the follower drone (TF frame from Gazebo, see bridge.yaml).
+      # Other views: Views panel -> Type "Orbit" + Target Frame "leader" or "<Fixed Frame>".
+      Class: rviz_default_plugins/ThirdPersonFollower
+      Name: Follow the follower
+      Target Frame: follower_truth
+      Distance: 25
       Focal Point:
         X: 0
         Y: 0
-        Z: 20
-      Pitch: 0.6
-      Yaw: 3.9
-      Target Frame: <Fixed Frame>
-      Value: Orbit (rviz)
-    Saved: ~
+        Z: 0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Near Clip Distance: 0.01
+      Pitch: 0.45
+      Yaw: 3.14
+      Value: ThirdPersonFollower (rviz_default_plugins)
+    Saved:
+      - Class: rviz_default_plugins/Orbit
+        Name: World overview
+        Distance: 250
+        Focal Point:
+          X: 100
+          Y: 100
+          Z: 20
+        Pitch: 0.8
+        Yaw: 3.9
+        Target Frame: <Fixed Frame>
+        Value: Orbit (rviz_default_plugins)
+      - Class: rviz_default_plugins/ThirdPersonFollower
+        Name: Follow the leader
+        Target Frame: leader
+        Distance: 25
+        Focal Point:
+          X: 0
+          Y: 0
+          Z: 0
+        Pitch: 0.45
+        Yaw: 3.14
+        Value: ThirdPersonFollower (rviz_default_plugins)
 Window Geometry:
   Width: 1400
   Height: 900

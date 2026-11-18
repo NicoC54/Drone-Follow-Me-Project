@@ -66,3 +66,16 @@
   ros_type_name: sensor_msgs/msg/Image
   gz_type_name: gz.msgs.Image
   direction: ROS_TO_GZ
+
+# --- TF for visualisation (RViz camera can follow a frame): world -> follower_truth, world -> leader
+# Published by the OdometryPublisher plugins (ground truth: display only, never used by the GNC).
+- ros_topic_name: /tf
+  gz_topic_name: /model/follower/pose
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: gz.msgs.Pose_V
+  direction: GZ_TO_ROS
+- ros_topic_name: /tf
+  gz_topic_name: /model/leader/pose
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: gz.msgs.Pose_V
+  direction: GZ_TO_ROS
