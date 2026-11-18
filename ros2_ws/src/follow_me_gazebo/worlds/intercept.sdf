@@ -109,12 +109,12 @@
         <real_time_factor>true</real_time_factor>
         <iterations>true</iterations>
       </plugin>
-      <plugin filename="ImageDisplay" name="Follower camera (detector view)">
+      <plugin filename="ImageDisplay" name="Follower camera (HUD)">
         <gz-gui>
-          <title>Follower camera (detector view)</title>
+          <title>Follower camera (HUD)</title>
           <property type="string" key="state">docked</property>
         </gz-gui>
-        <topic>/follower/detector/debug_image</topic>
+        <topic>/follower/hud_image</topic>
         <topic_picker>true</topic_picker>
       </plugin>
       <plugin filename="EntityTree" name="Entity tree"/>
@@ -199,15 +199,72 @@
           <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
         <visual name="arm_4"><pose>0.28 -0.28 0 0 0 -0.785</pose><geometry><box><size>0.4 0.03 0.03</size></box></geometry>
           <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
-        <visual name="rotor_1"><pose>0.42 0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
-        <visual name="rotor_2"><pose>-0.42 0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
-        <visual name="rotor_3"><pose>-0.42 -0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
-        <visual name="rotor_4"><pose>0.42 -0.42 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.2 0.2 0.2 0.8</ambient><diffuse>0.2 0.2 0.2 0.8</diffuse></material></visual>
       </link>
+      <!-- Spinning propellers (visual only: 4 x 1 g; thrust comes from the flight model) -->
+      <link name="rotor_1">
+        <pose>0.42 0.42 0.03 0 0 0</pose>
+        <gravity>false</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material></visual>
+      </link>
+      <joint name="rotor_1_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_1</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
+      <link name="rotor_2">
+        <pose>-0.42 0.42 0.03 0 0 0</pose>
+        <gravity>false</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material></visual>
+      </link>
+      <joint name="rotor_2_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_2</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
+      <link name="rotor_3">
+        <pose>-0.42 -0.42 0.03 0 0 0</pose>
+        <gravity>false</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material></visual>
+      </link>
+      <joint name="rotor_3_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_3</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
+      <link name="rotor_4">
+        <pose>0.42 -0.42 0.03 0 0 0</pose>
+        <gravity>false</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material></visual>
+      </link>
+      <joint name="rotor_4_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_4</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
       <!-- Twist in BODY frame: linear.x = forward speed, linear.z = climb, angular.z = turn rate -->
       <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
         <topic>/model/leader/cmd_vel</topic>
@@ -218,6 +275,22 @@
         <odom_topic>/model/leader/odometry</odom_topic>
         <dimensions>3</dimensions>
         <odom_publish_frequency>50</odom_publish_frequency>
+      </plugin>
+          <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_1_joint</joint_name>
+        <initial_velocity>40.0</initial_velocity>
+      </plugin>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_2_joint</joint_name>
+        <initial_velocity>-40.0</initial_velocity>
+      </plugin>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_3_joint</joint_name>
+        <initial_velocity>-40.0</initial_velocity>
+      </plugin>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_4_joint</joint_name>
+        <initial_velocity>40.0</initial_velocity>
       </plugin>
     </model>
 
@@ -240,15 +313,72 @@
           <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material></visual>
         <visual name="arm_4"><pose>0.22 -0.22 0 0 0 -0.785</pose><geometry><box><size>0.42 0.03 0.03</size></box></geometry>
           <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material></visual>
-        <visual name="rotor_1"><pose>0.37 0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
-        <visual name="rotor_2"><pose>-0.37 0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
-        <visual name="rotor_3"><pose>-0.37 -0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
-        <visual name="rotor_4"><pose>0.37 -0.37 0.03 0 0 0</pose><geometry><cylinder><radius>0.14</radius><length>0.01</length></cylinder></geometry>
-          <material><ambient>0.3 0.3 0.3 0.8</ambient><diffuse>0.3 0.3 0.3 0.8</diffuse></material></visual>
       </link>
+      <!-- Spinning propellers (visual only: 4 x 1 g; thrust comes from the flight model) -->
+      <link name="rotor_1">
+        <pose>0.37 0.37 0.03 0 0 0</pose>
+        <gravity>true</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+      </link>
+      <joint name="rotor_1_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_1</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
+      <link name="rotor_2">
+        <pose>-0.37 0.37 0.03 0 0 0</pose>
+        <gravity>true</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+      </link>
+      <joint name="rotor_2_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_2</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
+      <link name="rotor_3">
+        <pose>-0.37 -0.37 0.03 0 0 0</pose>
+        <gravity>true</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+      </link>
+      <joint name="rotor_3_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_3</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
+      <link name="rotor_4">
+        <pose>0.37 -0.37 0.03 0 0 0</pose>
+        <gravity>true</gravity>
+        <inertial><mass>0.001</mass>
+          <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+        <visual name="disc"><geometry><cylinder><radius>0.14</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.25 0.25 0.25 0.35</ambient><diffuse>0.25 0.25 0.25 0.35</diffuse></material></visual>
+        <visual name="blade"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.27 0.026 0.004</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1.00</ambient><diffuse>0.05 0.05 0.05 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+        <visual name="hub"><geometry><cylinder><radius>0.02</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.60 0.60 0.62 1.00</ambient><diffuse>0.60 0.60 0.62 1.00</diffuse></material><visibility_flags>2</visibility_flags></visual>
+      </link>
+      <joint name="rotor_4_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_4</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+      </joint>
 
       <!-- Gimbal: yaw joint (z) then pitch joint (axis -y, so positive = camera looks UP) -->
       <!-- Gimbal hangs 25 cm below the body: the airframe cannot hide the target for normal tilts -->
@@ -278,6 +408,7 @@
           <update_rate>30</update_rate>
           <topic>/follower/camera/image</topic>
           <camera>
+            <visibility_mask>4294967293</visibility_mask>
             <horizontal_fov>1.349482</horizontal_fov>
             <image><width>640</width><height>360</height><format>R8G8B8</format></image>
             <clip><near>0.1</near><far>800</far></clip>
@@ -323,6 +454,22 @@
       </plugin>
       <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
         <topic>/model/follower/joint_state</topic>
+      </plugin>
+          <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_1_joint</joint_name>
+        <initial_velocity>40.0</initial_velocity>
+      </plugin>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_2_joint</joint_name>
+        <initial_velocity>-40.0</initial_velocity>
+      </plugin>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_3_joint</joint_name>
+        <initial_velocity>-40.0</initial_velocity>
+      </plugin>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>rotor_4_joint</joint_name>
+        <initial_velocity>40.0</initial_velocity>
       </plugin>
     </model>
   </world>
