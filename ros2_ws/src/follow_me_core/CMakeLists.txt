@@ -26,6 +26,10 @@ add_library(${PROJECT_NAME}
   src/attitude_control.cpp
   src/nav_sensors.cpp
   src/nav_eskf.cpp
+  src/radar_model.cpp
+  src/fusion_tracker.cpp
+  src/mission.cpp
+  src/intercept_sim.cpp
   src/offline_sim.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -52,6 +56,12 @@ if(BUILD_TESTING)
   target_link_libraries(test_quadrotor ${PROJECT_NAME})
   ament_add_gtest(test_nav test/test_nav.cpp)
   target_link_libraries(test_nav ${PROJECT_NAME})
+  ament_add_gtest(test_radar test/test_radar.cpp)
+  target_link_libraries(test_radar ${PROJECT_NAME})
+  ament_add_gtest(test_fusion test/test_fusion.cpp)
+  target_link_libraries(test_fusion ${PROJECT_NAME})
+  ament_add_gtest(test_mission test/test_mission.cpp)
+  target_link_libraries(test_mission ${PROJECT_NAME})
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
