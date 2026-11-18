@@ -100,6 +100,23 @@ struct NavFilterParams {
   double gate_chi2_1d = 10.83;           // chi2(1 dof) 99.9 %
 };
 
+// Ground surveillance radar (counter-UAS type). Sends raw detections ("plots") of every echo
+// (target, the follower itself, clutter) to the follower over a datalink.
+struct GroundRadarParams {
+  Vec3 position = Vec3(-60.0, -40.0, 3.0);  // radar site, ENU [m]
+  double scan_rate = 2.0;          // scans per second [Hz]
+  double latency = 0.3;            // processing + datalink delay [s]
+  double max_range = 2000.0;       // [m]
+  double min_range = 15.0;         // blind range [m]
+  double min_elevation_deg = 1.0;  // below: ground clutter, no detection
+  double sigma_range = 2.0;        // [m]
+  double sigma_az_deg = 0.5;
+  double sigma_el_deg = 0.8;
+  double sigma_rdot = 0.3;         // radial velocity (Doppler) [m/s]
+  double p_detect = 0.9;           // per scan and per real object
+  double clutter_per_scan = 1.0;   // mean number of false plots per scan (Poisson)
+};
+
 struct CameraParams {
   int width = 1280;
   int height = 720;
