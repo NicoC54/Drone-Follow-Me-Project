@@ -76,6 +76,24 @@ void FusionTracker::processCamera(Core& c, double t, const CameraObs& o) const {
   Mat3 R_extra = o.R_extra;
   const Vec3 rc = PinholeCamera::toCamera(c.ekf.position(), o.cam_pos, o.R_cw);
   if (rc.z() <= 0.1) return;
+  // Detectability: if even a large drone (size + 2 sigma) would be under detectable_px at the
+  // tracked depth, whatever the detector found is NOT the target (Gazebo phase 4 with scenery: 2 px
+  // trees on the horizon at 480 m, where the drone is 0.4 px, pulled the radar track away).
+  if (cp.fx * (c.W + 2.0 * std::sqrt(c.W_var)) / rc.z() < p_.detectable_px) return;
+  // Size plausibility (before the size is learnt the camera is used for bearing only, so nothing
+  // else checks it): at the depth given by the track, the blob must not be larger than any drone.
+  // Gazebo phase 4 with scenery: a 35 px group of trees on the horizon at 480 m (= a 40 m object)
+  // was accepted as the target and dragged the track away.
+  if (o.size_valid && o.z(2) > 0.0) {
+    const Vec3 fwd = o.R_cw.row(2).transpose();  // optical axis in the world frame
+    const double sz = std::sqrt(std::max(fwd.dot(c.ekf.positionCov() * fwd), 0.0));
+    const double z_near = std::max(rc.z() - 3.0 * sz, 0.1);
+    if (o.z(2) * z_near / cp.fx > p_.size_max) {
+      c.cam_consec = 0;
+      ++c.stats.cam_rejected;
+      return;
+    }
+  }
   if (use_size) {  // the size prediction f*W/z inherits the uncertainty of W, plus the aspect
     const double ds = cp.fx * std::sqrt(c.W_var) / rc.z();
     const double da = p_.size_rel_noise * o.z(2);

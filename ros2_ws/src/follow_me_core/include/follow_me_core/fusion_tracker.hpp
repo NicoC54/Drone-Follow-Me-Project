@@ -55,6 +55,11 @@ struct FusionParams {
   // rotating X shape varies by ~10 %. Relative noise added to the size measurement (Gazebo phase
   // 4: without it, target NEES ~30 instead of ~6).
   double size_rel_noise = 0.10;
+  // Largest plausible target [m]: a detection implying a bigger object at the tracked depth is
+  // scenery (trees, roofs on the horizon), not the drone.
+  double size_max = 3.0;
+  // Camera ignored while the target is expected smaller than this (out of detection range) [px]
+  double detectable_px = 2.0;
 };
 
 class FusionTracker {

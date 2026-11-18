@@ -128,3 +128,43 @@ TEST(FusionTracker, LearnsTheTargetSizeAndThenRangesWithTheCamera) {
   EXPECT_LT(std::abs(e.dot(los)), 3.0 * sigma_los);   // ~0.4 m for sigma ~0.28 m at 16 m
   EXPECT_LT((e - e.dot(los) * los).norm(), 0.15);     // lateral: bearing-limited
 }
+
+// Scenery in the image (trees, roofs on the horizon) must not be fused as the target.
+// Gazebo phase 4 with scenery: 2 px trees at 480 m, where the drone is 0.4 px, dragged the radar
+// track away; a 35 px group of trees (= a 40 m object at that depth) was taken for the target.
+TEST(FusionTracker, IgnoresBlobsThatCannotBeTheTarget) {
+  World w;
+  auto radar_only = generate(w, 30.0, /*close=*/false, /*camera=*/false, 9);
+  // (1) Far away (~350 m): the target cannot be seen, any blob is something else.
+  auto with_clutter = radar_only;
+  const PinholeCamera cam(w.cp);
+  for (double t = 0.0; t < 30.0; t += 1.0 / 30.0) {
+    const Vec3 pf = w.follower(t, false), pt = w.target(t);
+    const auto [yaw, pitch] = lookAt(pf, pt);
+    Arrival a{t + 0.02, t, false, {}, {}};
+    a.c.z = Vec3(320 + 15, 180 + 12, 2.0);  // a 2 px blob 19 px from the target
+    a.c.cam_pos = pf;
+    a.c.R_cw = rotWorldToCam(yaw, pitch);
+    with_clutter.push_back(a);
+  }
+  const auto ref = run(w, radar_only, false);
+  const auto tr = run(w, with_clutter, false);
+  EXPECT_EQ(tr.stats().cam_used, 0);
+  EXPECT_TRUE(tr.predictedAt(30.0).x().isApprox(ref.predictedAt(30.0).x(), 1e-9));  // = radar alone
+
+  // (2) Close (~16 m): a 250 px blob on the target bearing would be a 10 m object. (The gate is
+  // conservative: depth taken 3 sigma closer, so a merely "too big" 4 m blob may pass early on.)
+  auto close = generate(w, 30.0, /*close=*/true, /*camera=*/false, 10);
+  for (double t = 0.0; t < 30.0; t += 1.0 / 30.0) {
+    const Vec3 pf = w.follower(t, true), pt = w.target(t);
+    const auto [yaw, pitch] = lookAt(pf, pt);
+    Arrival a{t + 0.02, t, false, {}, {}};
+    a.c.z = Vec3(320, 180, w.cp.fx * 10.0 / (pt - pf).norm());
+    a.c.cam_pos = pf;
+    a.c.R_cw = rotWorldToCam(yaw, pitch);
+    close.push_back(a);
+  }
+  const auto tr2 = run(w, close, false);
+  EXPECT_EQ(tr2.stats().cam_used, 0);
+  EXPECT_GT(tr2.stats().cam_rejected, 500);
+}
