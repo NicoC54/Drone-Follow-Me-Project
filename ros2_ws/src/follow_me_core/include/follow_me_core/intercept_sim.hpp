@@ -9,6 +9,8 @@
 #include "follow_me_core/mission.hpp"
 #include "follow_me_core/offline_sim.hpp"
 
+#include <string>
+
 namespace follow_me {
 
 struct InterceptConfig {
@@ -19,6 +21,9 @@ struct InterceptConfig {
   double target_size = 0.6;       // TRUE size of the target drone (unknown to the tracker)
   double camera_max_range = 300.0;
   Vec3 follower_start = Vec3(-50.0, -30.0, 20.0);
+  // Optional logs for figures, GIF and the web replay (empty = no log):
+  //   <out_dir>/intercept.csv (10 Hz state), <out_dir>/radar.csv (every radar plot)
+  std::string out_dir;
   InterceptConfig();              // sets the intercept scenario defaults
 };
 
@@ -37,5 +42,9 @@ struct InterceptMetrics {
 
 InterceptMetrics runInterceptSim(const InterceptConfig& cfg);
 void printInterceptMetrics(const InterceptMetrics& m, double target_size);
+
+// Monte-Carlo campaign: n randomised interceptions (wind, radar latency and clutter, target
+// size, sensor noise seeds). One CSV line per run: drawn parameters + metrics.
+void runInterceptMonteCarlo(int n, std::uint64_t seed0, const std::string& csv_path);
 
 }  // namespace follow_me

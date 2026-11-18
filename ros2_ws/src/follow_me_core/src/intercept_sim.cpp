@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <deque>
+#include <fstream>
 #include <random>
 
 #include "follow_me_core/controller.hpp"
@@ -60,6 +61,18 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
   double s_derr2 = 0, s_eerr2 = 0;
   int n_follow_stat = 0, n_follow = 0;
   MissionPhase last_phase = MissionPhase::Wait;
+  double last_detection_t = -1.0;
+
+  // ---- optional logs (figures, GIF, web replay) ----
+  std::ofstream log, radar_log;
+  if (!cfg.out_dir.empty()) {
+    log.open(cfg.out_dir + "/intercept.csv");
+    radar_log.open(cfg.out_dir + "/radar.csv");
+    log << "t,phase,lx,ly,lz,fx,fy,fz,qw,qx,qy,qz,nx,ny,nz,ex,ey,ez,evx,evy,evz,"
+           "pxx,pxy,pxz,pyy,pyz,pzz,track,locked,size,size_sigma,dist,ax,ay,az,t_go,"
+           "gimbal_yaw,gimbal_pitch,camera_sees\n";
+    radar_log << "t,x,y,z,kind\n";  // kind: 0 clutter, 1 target, 2 own echo (ground truth label)
+  }
 
   for (int k = 0; k < n_steps; ++k) {
     const double t = k * dt;
@@ -69,6 +82,12 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
       RadarMsg msg{t + cfg.radar.latency, t, {}};
       msg.obs.plots = radar.scan(t, {{leader.position(), leader.velocity(), true, false},
                                      {follower.truePosition(), follower.velocity(), false, true}}).plots;
+      if (radar_log.is_open())
+        for (const auto& pl : msg.obs.plots) {
+          const auto c = radarToCartesian(pl, cfg.radar);
+          radar_log << t << ',' << c.p.x() << ',' << c.p.y() << ',' << c.p.z() << ','
+                    << (pl.is_target ? 1 : pl.is_own ? 2 : 0) << '\n';
+        }
       msg.obs.own_pos = follower.position();  // what the follower believes (navigation)
       msg.obs.own_P = follower.navPosCov() + 0.01 * Mat3::Identity();
       radar_link.push_back(std::move(msg));
@@ -88,6 +107,7 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
           msg.obs.R_extra = tracker.cameraPoseNoise(msg.obs.cam_pos, msg.obs.R_cw, follower.navPosCov(),
                                                     follower.navAttSigma());
           cam_link.push_back(std::move(msg));
+          last_detection_t = t;
         }
       }
     }
@@ -149,6 +169,21 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
       t_follow_start = -1.0;
     }
 
+    if (log.is_open() && k % 10 == 0) {  // 10 Hz
+      const Vec3& L = leader.position();
+      const Vec3 F = follower.truePosition(), N = follower.position();
+      const Quat q = follower.trueAttitude();
+      const Mat3 P = est.positionCov();
+      log << t << ',' << static_cast<int>(out.phase) << ',' << L.x() << ',' << L.y() << ',' << L.z() << ','
+          << F.x() << ',' << F.y() << ',' << F.z() << ',' << q.w() << ',' << q.x() << ',' << q.y() << ','
+          << q.z() << ',' << N.x() << ',' << N.y() << ',' << N.z() << ',' << est.position().x() << ','
+          << est.position().y() << ',' << est.position().z() << ',' << est.velocity().x() << ','
+          << est.velocity().y() << ',' << est.velocity().z() << ',' << P(0, 0) << ',' << P(0, 1) << ','
+          << P(0, 2) << ',' << P(1, 1) << ',' << P(1, 2) << ',' << P(2, 2) << ',' << has_track << ','
+          << locked << ',' << tracker.sizeEstimate() << ',' << tracker.sizeSigma() << ',' << dist << ','
+          << out.p_aim.x() << ',' << out.p_aim.y() << ',' << out.p_aim.z() << ',' << out.t_go << ','
+          << gimbal.yaw() << ',' << gimbal.pitch() << ',' << (t - last_detection_t < 0.1) << '\n';
+    }
     follower.step(a_cmd, yaw_des, dt);
     leader.step(t, dt);
   }
@@ -161,6 +196,30 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
   m.size_sigma = tracker.sizeSigma();
   m.fusion = tracker.stats();
   return m;
+}
+
+void runInterceptMonteCarlo(int n, std::uint64_t seed0, const std::string& csv_path) {
+  std::ofstream csv(csv_path);
+  csv << "run,seed,wind,radar_latency,clutter,target_size,initial_range,t_track,t_lock,t_follow,"
+         "min_distance,time_below_dmin,follow_dist_err_rms,follow_est_err_rms,follow_pct,size_est\n";
+  std::mt19937_64 rng(seed0);
+  std::uniform_real_distribution<double> u(0.0, 1.0);
+  for (int i = 0; i < n; ++i) {
+    InterceptConfig cfg;
+    cfg.base.seed = seed0 + 1000 + static_cast<std::uint64_t>(i);
+    const double wind = 6.0 * u(rng), heading = 2.0 * M_PI * u(rng);
+    cfg.base.quad.wind = Vec3(wind * std::cos(heading), wind * std::sin(heading), 0.0);
+    cfg.radar.latency = 0.1 + 0.5 * u(rng);
+    cfg.radar.clutter_per_scan = 4.0 * u(rng);
+    cfg.target_size = 0.4 + 0.8 * u(rng);
+    const auto m = runInterceptSim(cfg);
+    csv << i << ',' << cfg.base.seed << ',' << wind << ',' << cfg.radar.latency << ','
+        << cfg.radar.clutter_per_scan << ',' << cfg.target_size << ',' << m.initial_range << ','
+        << m.t_track << ',' << m.t_lock << ',' << m.t_follow << ',' << m.min_distance << ','
+        << m.time_below_dmin << ',' << m.follow_dist_err_rms << ',' << m.follow_est_err_rms << ','
+        << m.follow_pct << ',' << m.size_est << '\n';
+    if ((i + 1) % 25 == 0) std::printf("  %d / %d runs\n", i + 1, n);
+  }
 }
 
 void printInterceptMetrics(const InterceptMetrics& m, double target_size) {
