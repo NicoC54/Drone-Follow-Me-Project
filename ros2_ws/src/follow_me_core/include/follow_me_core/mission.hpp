@@ -61,6 +61,8 @@ class MissionManager {
     Vec3 p_des, v_des;      // position-control setpoint
     double v_max;           // speed limit for this phase
     bool hold;              // true: hold position (no track, or blind and too close)
+    Vec3 p_aim = Vec3::Zero();  // where we are heading: PIP (midcourse/hand-over), follow point (FOLLOW)
+    double t_go = 0.0;          // PIP time to go [s] (0 outside midcourse/hand-over)
   };
   Output update(const Input& in, double dt);
   MissionPhase phase() const { return phase_; }

@@ -92,6 +92,7 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
       if (!hold_) hold_ = in.p_f;
       out.p_des = *hold_;
       out.v_des = Vec3::Zero();
+      out.p_aim = *hold_;
       out.hold = true;
       return out;
     case MissionPhase::Midcourse:
@@ -107,6 +108,8 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
       if (handover && range < ip_.blind_hold_range) closing.setZero();
       out.v_des = handover ? Vec3(in.v_t + closing) : closing;
       out.p_des = in.p_f + out.v_des * 0.5;  // velocity tracking (no position error to amplify)
+      out.p_aim = rv.p_aim;
+      out.t_go = std::isfinite(rv.t_go) ? rv.t_go : 0.0;
       out.v_max = handover ? in.v_t.norm() + ip_.handover_speed : ip_.approach_speed;
       return out;
     }
@@ -115,6 +118,7 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
       const auto sp = guidance_.compute(in.p_f, in.p_t, in.v_t, dt);
       out.p_des = sp.p;
       out.v_des = sp.v;
+      out.p_aim = sp.p;
       return out;
     }
   }
