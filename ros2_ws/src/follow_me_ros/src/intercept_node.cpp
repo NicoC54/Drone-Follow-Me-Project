@@ -117,10 +117,11 @@ class InterceptNode : public rclcpp::Node {
     pub_pitch_->publish(std_msgs::msg::Float64().set__data(pitch_cmd));
     if (safety_active && !was_safety_) RCLCPP_WARN(get_logger(), "Safety filter ACTIVE");
     was_safety_ = safety_active;
-    if (++tick_count_ % 5 == 0) publishMarkers(stamp, out, has_track);
+    if (++tick_count_ % 5 == 0) publishMarkers(stamp, out, has_track, p_t, v_t);
   }
 
-  void publishMarkers(const rclcpp::Time& stamp, const follow_me::MissionManager::Output& out, bool has_track) {
+  void publishMarkers(const rclcpp::Time& stamp, const follow_me::MissionManager::Output& out, bool has_track,
+                      const Vec3& p_t, const Vec3& v_t) {
     visualization_msgs::msg::MarkerArray arr;
     Marker m;
     m.header.stamp = stamp;
@@ -146,6 +147,64 @@ class InterceptNode : public rclcpp::Node {
     txt.color.r = txt.color.g = txt.color.b = 1.0f;
     txt.text = std::string("MISSION: ") + follow_me::toString(out.phase) + (has_track ? "" : " (no track)");
     arr.markers.push_back(txt);
+
+    // Guidance geometry (MIDCOURSE / HANDOVER): predicted intercept point, the follower's straight
+    // approach to it and the target's constant-velocity prediction up to the rendezvous time.
+    const bool pip = has_track && (out.phase == MissionPhase::Midcourse || out.phase == MissionPhase::Handover);
+    const auto orange = follow_me_ros::rgba(0.92f, 0.41f, 0.20f, 1.0f);
+    Marker aim;
+    aim.header = m.header;
+    aim.ns = "pip";
+    aim.action = pip ? Marker::ADD : Marker::DELETE;
+    aim.type = Marker::CUBE;  // a diamond: cube rotated 45 deg about x and y
+    aim.pose.position = follow_me_ros::toPoint(out.p_aim);
+    const Eigen::Quaterniond qd = Eigen::AngleAxisd(M_PI / 4, Vec3::UnitX()) * Eigen::AngleAxisd(M_PI / 4, Vec3::UnitY());
+    aim.pose.orientation.w = qd.w();
+    aim.pose.orientation.x = qd.x();
+    aim.pose.orientation.y = qd.y();
+    aim.pose.orientation.z = qd.z();
+    aim.scale.x = aim.scale.y = aim.scale.z = 2.0;
+    aim.color = orange;
+    arr.markers.push_back(aim);
+
+    Marker approach;
+    approach.header = m.header;
+    approach.ns = "approach";
+    approach.action = aim.action;
+    approach.type = Marker::LINE_LIST;  // dashed line follower -> PIP
+    approach.pose.orientation.w = 1.0;
+    approach.scale.x = 0.25;
+    approach.color = orange;
+    const Vec3 d = out.p_aim - odom_->p;
+    const int n_dash = std::clamp(int(d.norm() / 6.0), 1, 80);
+    for (int k = 0; k < n_dash; ++k) {
+      approach.points.push_back(follow_me_ros::toPoint(odom_->p + d * (double(k) / n_dash)));
+      approach.points.push_back(follow_me_ros::toPoint(odom_->p + d * ((k + 0.5) / n_dash)));
+    }
+    arr.markers.push_back(approach);
+
+    Marker pred;
+    pred.header = m.header;
+    pred.ns = "target_prediction";
+    pred.action = aim.action;
+    pred.type = Marker::LINE_STRIP;
+    pred.pose.orientation.w = 1.0;
+    pred.scale.x = 0.2;
+    pred.color = follow_me_ros::rgba(0.89f, 0.29f, 0.28f, 0.8f);
+    const double horizon = out.t_go > 0 ? std::min(out.t_go, 60.0) : 10.0;
+    for (int k = 0; k <= 20; ++k) pred.points.push_back(follow_me_ros::toPoint(p_t + v_t * (horizon * k / 20.0)));
+    arr.markers.push_back(pred);
+
+    Marker info = txt;
+    info.ns = "pip_text";
+    info.action = aim.action;
+    info.pose.position = follow_me_ros::toPoint(out.p_aim + Vec3(0, 0, 3.0));
+    info.scale.z = 2.0;
+    info.color = orange;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "PIP  t_go %.0f s", out.t_go);
+    info.text = buf;
+    arr.markers.push_back(info);
     pub_mk_->publish(arr);
   }
 

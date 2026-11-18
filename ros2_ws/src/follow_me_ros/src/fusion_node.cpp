@@ -7,7 +7,6 @@
 //          /follower/detector/roi (where the detector must look in the next image: "cueing"),
 //          /tracker/markers.
 // Every measurement is fused at its CAPTURE time; late ones are handled by an exact replay.
-#include <Eigen/Eigenvalues>
 #include <follow_me_msgs/msg/detection.hpp>
 #include <follow_me_msgs/msg/radar_scan.hpp>
 #include <follow_me_msgs/msg/roi.hpp>
@@ -192,25 +191,9 @@ class FusionNode : public rclcpp::Node {
       return;
     }
     const Vec3 p = ekf.position();
-    Eigen::SelfAdjointEigenSolver<Mat3> es(ekf.positionCov());
-    Mat3 axes = es.eigenvectors();
-    if (axes.determinant() < 0) axes.col(0) *= -1.0;
-    const Eigen::Quaterniond q(axes);
-    Marker ell;
+    Marker ell = follow_me_ros::ellipsoidMarker(p, ekf.positionCov(), 3.0);
     ell.header = h;
     ell.ns = "estimate_cov";
-    ell.type = Marker::SPHERE;
-    ell.pose.position.x = p.x();
-    ell.pose.position.y = p.y();
-    ell.pose.position.z = p.z();
-    ell.pose.orientation.w = q.w();
-    ell.pose.orientation.x = q.x();
-    ell.pose.orientation.y = q.y();
-    ell.pose.orientation.z = q.z();
-    const Vec3 ev = es.eigenvalues().cwiseMax(1e-6).cwiseSqrt() * 6.0;
-    ell.scale.x = ev.x();
-    ell.scale.y = ev.y();
-    ell.scale.z = ev.z();
     ell.color.r = locked ? 0.2f : 1.0f;  // green when the camera is locked, orange on radar only
     ell.color.g = locked ? 1.0f : 0.55f;
     ell.color.a = 0.35f;
@@ -228,7 +211,37 @@ class FusionNode : public rclcpp::Node {
                   locked ? "CAM LOCK" : "RADAR", tracker_.sizeEstimate());
     txt.text = buf;
     arr.markers.push_back(txt);
+    if (const auto pose = cameraPoseAt(rclcpp::Time(h.stamp).seconds() - 0.01))
+      arr.markers.push_back(frustumMarker(h, *pose, (p - pose->pos).norm(), locked));
     pub_mk_->publish(arr);
+  }
+
+  // Camera field of view: a pyramid from the camera centre to the image corners, cut at the
+  // target range (what the detector can see; the ROI is the small window inside it).
+  Marker frustumMarker(const std_msgs::msg::Header& h, const CameraPose& pose, double range, bool locked) const {
+    Marker m;
+    m.header = h;
+    m.ns = "camera_fov";
+    m.type = Marker::LINE_LIST;
+    m.pose.orientation.w = 1.0;
+    m.scale.x = 0.05;
+    m.color = locked ? follow_me_ros::rgba(0.11f, 0.69f, 0.48f, 0.9f) : follow_me_ros::rgba(0.93f, 0.63f, 0.0f, 0.9f);
+    const double d = std::clamp(range, 3.0, 60.0);
+    const Mat3 R_wc = pose.R_cw.transpose();
+    Vec3 c[4];
+    const double us[4] = {0, double(cam_prm_.width), double(cam_prm_.width), 0};
+    const double vs[4] = {0, 0, double(cam_prm_.height), double(cam_prm_.height)};
+    for (int k = 0; k < 4; ++k) {
+      const Vec3 rc((us[k] - 0.5 * cam_prm_.width) / cam_prm_.fx * d, (vs[k] - 0.5 * cam_prm_.height) / cam_prm_.fy * d, d);
+      c[k] = pose.pos + R_wc * rc;
+    }
+    for (int k = 0; k < 4; ++k) {
+      m.points.push_back(follow_me_ros::toPoint(pose.pos));
+      m.points.push_back(follow_me_ros::toPoint(c[k]));
+      m.points.push_back(follow_me_ros::toPoint(c[k]));
+      m.points.push_back(follow_me_ros::toPoint(c[(k + 1) % 4]));
+    }
+    return m;
   }
 
   follow_me::CameraParams cam_prm_;

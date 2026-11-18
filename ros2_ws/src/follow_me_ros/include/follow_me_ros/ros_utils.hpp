@@ -1,10 +1,12 @@
 // Small helpers shared by the nodes: message conversions, parameter declaration, camera pose.
 #pragma once
 
+#include <Eigen/Eigenvalues>
 #include <Eigen/Geometry>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -187,6 +189,8 @@ inline follow_me::FusionParams declareFusion(rclcpp::Node& n) {
   f.lock_count = n.declare_parameter("fusion.lock_count", f.lock_count);
   f.size_prior = n.declare_parameter("fusion.size_prior", f.size_prior);
   f.size_prior_sigma = n.declare_parameter("fusion.size_prior_sigma", f.size_prior_sigma);
+  f.size_max = n.declare_parameter("fusion.size_max", f.size_max);
+  f.detectable_px = n.declare_parameter("fusion.detectable_px", f.detectable_px);
   return f;
 }
 
@@ -198,6 +202,42 @@ inline follow_me::InterceptParams declareIntercept(rclcpp::Node& n) {
   i.blind_hold_range = n.declare_parameter("intercept.blind_hold_range", i.blind_hold_range);
   i.lock_lost_time = n.declare_parameter("intercept.lock_lost_time", i.lock_lost_time);
   return i;
+}
+
+// ---------- RViz marker helpers (pedagogical visualisation) ----------
+inline geometry_msgs::msg::Point toPoint(const Vec3& v) {
+  geometry_msgs::msg::Point q;
+  q.x = v.x();
+  q.y = v.y();
+  q.z = v.z();
+  return q;
+}
+inline std_msgs::msg::ColorRGBA rgba(float r, float g, float b, float a) {
+  std_msgs::msg::ColorRGBA c;
+  c.r = r;
+  c.g = g;
+  c.b = b;
+  c.a = a;
+  return c;
+}
+// n-sigma ellipsoid of a 3x3 position covariance (principal axes = eigenvectors).
+inline visualization_msgs::msg::Marker ellipsoidMarker(const Vec3& p, const Mat3& P, double n_sigma) {
+  Eigen::SelfAdjointEigenSolver<Mat3> es(P);
+  Mat3 axes = es.eigenvectors();
+  if (axes.determinant() < 0) axes.col(0) *= -1.0;
+  const Eigen::Quaterniond q(axes);
+  visualization_msgs::msg::Marker m;
+  m.type = visualization_msgs::msg::Marker::SPHERE;
+  m.pose.position = toPoint(p);
+  m.pose.orientation.w = q.w();
+  m.pose.orientation.x = q.x();
+  m.pose.orientation.y = q.y();
+  m.pose.orientation.z = q.z();
+  const Vec3 d = es.eigenvalues().cwiseMax(1e-6).cwiseSqrt() * (2.0 * n_sigma);  // diameters
+  m.scale.x = d.x();
+  m.scale.y = d.y();
+  m.scale.z = d.z();
+  return m;
 }
 
 }  // namespace follow_me_ros

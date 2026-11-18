@@ -90,6 +90,20 @@ class RadarNode : public rclcpp::Node {
       m.points.push_back(q);
     }
     arr.markers.push_back(m);
+    // Measurement uncertainty of each plot (3 sigma): a thin disc across the line of sight
+    // (angular noise grows with range: 0.5 deg = 9 m at 1 km) and only 2 m deep along it.
+    int id = 0;
+    for (const auto& p : s.plots) {
+      const auto c = follow_me::radarToCartesian(
+          follow_me::RadarPlot{p.range, p.azimuth, p.elevation, p.range_rate}, prm_);
+      auto e = follow_me_ros::ellipsoidMarker(c.p, c.P, 3.0);
+      e.header = s.header;
+      e.ns = "radar_plot_cov";
+      e.id = id++;
+      e.color = follow_me_ros::rgba(0.2f, 0.9f, 1.0f, 0.18f);
+      e.lifetime = rclcpp::Duration::from_seconds(1.0);
+      arr.markers.push_back(e);
+    }
     visualization_msgs::msg::Marker site = m;
     site.ns = "radar_site";
     site.type = visualization_msgs::msg::Marker::CYLINDER;
