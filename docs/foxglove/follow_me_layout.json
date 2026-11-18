@@ -1,0 +1,63 @@
+{
+  "configById": {
+    "3D!scene": {
+      "followMode": "follow-position",
+      "followTf": "follower_truth",
+      "cameraState": {
+        "distance": 40, "perspective": true, "phi": 60, "thetaOffset": 45,
+        "targetOffset": [0, 0, 0], "target": [0, 0, 0], "targetOrientation": [0, 0, 0, 1], "fovy": 45, "near": 0.5, "far": 5000
+      },
+      "scene": { "enableStats": false, "backgroundColor": "#dfe9f3", "transforms": { "showLabel": true, "axisScale": 2 } },
+      "layers": {
+        "grid": { "layerId": "foxglove.Grid", "visible": true, "frameId": "world", "size": 1000, "divisions": 50, "color": "#a9a69a" }
+      },
+      "topics": {
+        "/monitor/markers": { "visible": true },
+        "/tracker/markers": { "visible": true },
+        "/follow/markers": { "visible": true },
+        "/radar/markers": { "visible": true }
+      }
+    },
+    "Image!hud": { "imageMode": { "imageTopic": "/follower/hud_image" } },
+    "StateTransitions!phase": {
+      "paths": [ { "value": "/mission/phase.data", "timestampMethod": "receiveTime", "label": "mission phase" } ],
+      "isSynced": true
+    },
+    "Plot!distance": {
+      "title": "Distance to the target [m]",
+      "paths": [ { "value": "/monitor/distance.data", "enabled": true, "timestampMethod": "receiveTime", "label": "distance" } ],
+      "minYValue": 0, "showLegend": true, "isSynced": true
+    },
+    "Plot!estimation": {
+      "title": "Target estimate error [m] and NEES",
+      "paths": [
+        { "value": "/monitor/estimation_error.data", "enabled": true, "timestampMethod": "receiveTime", "label": "estimate error [m]" },
+        { "value": "/monitor/nees.data", "enabled": false, "timestampMethod": "receiveTime", "label": "NEES (ideal 6)" }
+      ],
+      "minYValue": 0, "showLegend": true, "isSynced": true
+    },
+    "Plot!size": {
+      "title": "Learnt target size [m]",
+      "paths": [ { "value": "/target/estimate.target_size", "enabled": true, "timestampMethod": "receiveTime", "label": "W" } ],
+      "showLegend": true, "isSynced": true
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "direction": "row",
+    "splitPercentage": 60,
+    "first": { "direction": "column", "splitPercentage": 62, "first": "3D!scene", "second": "Image!hud" },
+    "second": {
+      "direction": "column",
+      "splitPercentage": 16,
+      "first": "StateTransitions!phase",
+      "second": {
+        "direction": "column",
+        "first": "Plot!distance",
+        "second": { "direction": "column", "first": "Plot!estimation", "second": "Plot!size" }
+      }
+    }
+  }
+}
