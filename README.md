@@ -1,7 +1,32 @@
 # drone-follow-me
 
-Teaching simulation: a follower drone tracks a leader drone in the air at a safe distance,
-using only a gimbal camera. The whole GNC chain is there and kept deliberately small:
+Teaching GNC project: a follower drone intercepts an unknown drone picked up by a ground radar,
+hands over to its own camera, learns the target's size, then follows it at a safe distance.
+C++17 / ROS 2 Jazzy / Gazebo Harmonic, with a 6-DOF quadrotor flown by its own flight controller.
+
+![Radar-cued interception then camera follow](docs/media/intercept.gif)
+
+**[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** (three.js, runs in the browser)
+
+| | |
+|---|---|
+| ![top view](docs/media/intercept_overview.png) | ![distance](docs/media/intercept_distance.png) |
+
+![estimation](docs/media/intercept_estimation.png)
+
+**300 randomised runs** (wind 0-6 m/s, radar latency 0.1-0.6 s, clutter 0-4 plots/scan, target
+size 0.4-1.2 m): 300/300 reach FOLLOW, 0 below the 4 m minimum distance (worst 5.3 m),
+FOLLOW after 39 ± 13 s, median follow distance error 0.78 m RMS.
+
+![Monte-Carlo](docs/media/montecarlo.png)
+
+The project grew in four phases (each one documented in [docs/cours/](docs/cours/00_INDEX.md), French):
+1. Python sandbox: camera on a red beacon, EKF, guidance, control, safety filter.
+2. C++ / ROS 2 / Gazebo: the same algorithms on real rendered images.
+3. Real quadrotor: own flight controller (Gazebo plugin) + 15-state ESKF navigation.
+4. Ground radar + predicted-intercept-point guidance + camera hand-over on an unknown drone.
+
+The original phase-1 chain, kept deliberately small:
 
 ```
 truth (leader + follower)                                    vehicles.py
@@ -52,7 +77,28 @@ ros2 launch follow_me_gazebo follow_me.launch.py                 # Gazebo + RViz
 ros2 launch follow_me_gazebo follow_me.launch.py p_miss:=0.1 p_outlier:=0.02
 ./build/follow_me_core/follow_me_offline_sim --seed 3            # C++ offline sim, no ROS
 ./build/follow_me_core/follow_me_offline_sim --perfect-nav       # same, with perfect navigation
+
+# phase 4: radar-cued interception of an unknown drone
+ros2 launch follow_me_gazebo intercept.launch.py                 # Gazebo + RViz (+ foxglove:=true)
+./build/follow_me_core/follow_me_offline_sim --intercept --seed 2 --out ../out
+./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 300 --seed 7 --out ../out
 ```
+
+### Figures, GIF, web replay, Foxglove
+
+```bash
+python3 tools/make_figures.py out/ docs/media/      # README figures + GIF + docs/replay/replay.json
+python3 -m http.server -d docs 8000                 # then http://localhost:8000/replay/
+tools/record_demo.sh out/demo                       # MCAP recording of a running launch (Ctrl+C)
+python3 tools/gen_world_extras.py                   # regenerate propellers + scenery in the worlds
+```
+
+- RViz shows the algorithms: predicted intercept point, approach line, predicted target path,
+  camera field of view, 3σ ellipsoids of the estimate and of every radar plot.
+- The camera panel shows a HUD (`hud_node`): mission phase, range, track source, learnt size, lock.
+- Foxglove Studio: `sudo apt install ros-jazzy-foxglove-bridge`, launch with `foxglove:=true`, open
+  `ws://localhost:8765` and import [docs/foxglove/follow_me_layout.json](docs/foxglove/follow_me_layout.json)
+  (also works on an MCAP recording).
 
 ## What to look at (Python)
 
