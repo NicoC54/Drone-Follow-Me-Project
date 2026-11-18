@@ -5,8 +5,9 @@
 namespace follow_me {
 
 Vec3 PositionController::compute(const Vec3& p, const Vec3& v, const Vec3& p_des,
-                                 const Vec3& v_des, double dt) {
-  const Vec3 v_cmd = saturate(v_des + p_.kp_pos * (p_des - p), v_max_);
+                                 const Vec3& v_des, double dt, double v_max_override) {
+  const double v_max = v_max_override > 0.0 ? std::min(v_max_override, v_max_) : v_max_;
+  const Vec3 v_cmd = saturate(v_des + p_.kp_pos * (p_des - p), v_max);
   const Vec3 e_v = v_cmd - v;
   integral_ = saturate(integral_ + p_.ki * e_v * dt, p_.i_max);  // clamped: anti-windup
   return saturate(p_.kv * e_v + integral_, a_max_);

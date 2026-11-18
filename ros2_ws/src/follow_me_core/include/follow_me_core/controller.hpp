@@ -14,7 +14,9 @@ class PositionController {
       : p_(p), a_max_(a_max), v_max_(v_max) {}
 
   void reset() { integral_.setZero(); }
-  Vec3 compute(const Vec3& p, const Vec3& v, const Vec3& p_des, const Vec3& v_des, double dt);
+  // v_max_override > 0: speed limit for this call (mission phases), otherwise v_max.
+  Vec3 compute(const Vec3& p, const Vec3& v, const Vec3& p_des, const Vec3& v_des, double dt,
+               double v_max_override = -1.0);
 
  private:
   ControlParams p_;
