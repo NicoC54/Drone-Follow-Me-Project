@@ -7,6 +7,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <ros_gz_interfaces/msg/float32_array.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 #include "follow_me_core/camera_model.hpp"
@@ -45,6 +46,14 @@ class MonitorNode : public rclcpp::Node {
     sub_js_ = create_subscription<sensor_msgs::msg::JointState>(
         "/follower/joint_states", 1,
         [this](const sensor_msgs::msg::JointState& m) { follow_me_ros::updateGimbal(m, gimbal_); });
+    // Phase 4: mission phase, to time the interception and measure the follow quality only in FOLLOW.
+    sub_phase_ = create_subscription<std_msgs::msg::String>("/mission/phase", 10, [this](const std_msgs::msg::String& m) {
+      if (m.data != phase_) {
+        if (t_start_) phase_log_ += "  " + m.data + "@" + std::to_string(static_cast<int>(get_clock()->now().seconds() - *t_start_)) + "s";
+        if (m.data == "FOLLOW") t_follow_start_ = get_clock()->now().seconds();
+        phase_ = m.data;
+      }
+    });
     sub_est_ = create_subscription<TargetEstimate>("/target/estimate", 10,
                                                    [this](const TargetEstimate& m) { est_ = m; });
     pub_dist_ = create_publisher<std_msgs::msg::Float64>("/monitor/distance", 10);
@@ -57,6 +66,7 @@ class MonitorNode : public rclcpp::Node {
 
   // Printed from the shutdown callback (Ctrl+C), on stderr so it is not lost in a buffer.
   void printSummary() const {
+    if (!phase_log_.empty()) std::fprintf(stderr, "\n  mission phases:%s\n", phase_log_.c_str());
     const double n = std::max(n_steady_, 1);
     std::fprintf(stderr, "\n===== follow-me summary (%.0f s monitored) =====\n", n_total_ * 0.1);
     std::fprintf(stderr, "  estimation position RMSE [m]     %8.2f\n", std::sqrt(s_ep2_ / n));
@@ -115,7 +125,11 @@ class MonitorNode : public rclcpp::Node {
       const double nees = e.dot(P.ldlt().solve(e));
       pub_err_->publish(std_msgs::msg::Float64().set__data(e.head<3>().norm()));
       pub_nees_->publish(std_msgs::msg::Float64().set__data(nees));
-      if (t >= settle_time_) {
+      // Intercept mode: follow quality only counts in FOLLOW (after settling); otherwise after settle_time.
+      const bool steady = phase_.empty() ? t >= settle_time_
+                                         : (phase_ == "FOLLOW" && t_follow_start_ > 0 &&
+                                            get_clock()->now().seconds() - t_follow_start_ > 5.0);
+      if (steady) {
         ++n_steady_;
         s_ep2_ += e.head<3>().squaredNorm();
         s_ev2_ += e.tail<3>().squaredNorm();
@@ -163,19 +177,50 @@ class MonitorNode : public rclcpp::Node {
     // Link between the drones: green near the setpoint, red close to d_min.
     const double k = std::clamp((dist - d_min_) / (d_ref_ - d_min_), 0.0, 1.0);
     arr.markers.push_back(line("link", {leader_->p, follower_->p}, 1.0f - k, k, 0.1f));
-    auto drone = [&](const std::string& ns, const Vec3& p, float r, float g, float b) {
-      Marker m;
-      m.header = h;
-      m.ns = ns;
-      m.type = Marker::CUBE;
-      m.pose.position.x = p.x(); m.pose.position.y = p.y(); m.pose.position.z = p.z();
-      m.pose.orientation.w = 1.0;
-      m.scale.x = m.scale.y = 0.8; m.scale.z = 0.2;
-      m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 1.0f;
-      return m;
+    // Drones drawn IN their TF frame (bridged from Gazebo), frame-locked: they move with every TF
+    // update, tilt and turn with the drone. A light X-frame silhouette at the real Gazebo size
+    // (two arms + four translucent rotor discs) instead of an opaque box hiding the TF axes.
+    auto drone = [&](const std::string& ns, const std::string& frame, double rotor_xy, float r, float g,
+                     float b) {
+      Marker base;
+      base.header.frame_id = frame;
+      base.header.stamp = rclcpp::Time(0);  // latest available transform
+      base.frame_locked = true;
+      base.ns = ns;
+      base.pose.orientation.w = 1.0;
+      base.color.r = r; base.color.g = g; base.color.b = b;
+
+      Marker arms = base;  // the X frame
+      arms.id = 0;
+      arms.type = Marker::LINE_LIST;
+      arms.scale.x = 0.04;
+      arms.color.a = 0.9f;
+      for (const double sx : {1.0, -1.0}) {
+        geometry_msgs::msg::Point a, c;
+        a.x = sx * rotor_xy; a.y = rotor_xy;
+        c.x = -sx * rotor_xy; c.y = -rotor_xy;
+        arms.points.push_back(a);
+        arms.points.push_back(c);
+      }
+      arr.markers.push_back(arms);
+
+      int id = 1;  // the four rotor discs
+      for (const double sx : {1.0, -1.0})
+        for (const double sy : {1.0, -1.0}) {
+          Marker rotor = base;
+          rotor.id = id++;
+          rotor.type = Marker::CYLINDER;
+          rotor.pose.position.x = sx * rotor_xy;
+          rotor.pose.position.y = sy * rotor_xy;
+          rotor.pose.position.z = 0.03;
+          rotor.scale.x = rotor.scale.y = 0.28;
+          rotor.scale.z = 0.01;
+          rotor.color.a = 0.45f;
+          arr.markers.push_back(rotor);
+        }
     };
-    arr.markers.push_back(drone("leader_truth", leader_->p, 0.9f, 0.1f, 0.1f));
-    arr.markers.push_back(drone("follower", follower_->p, 0.1f, 0.3f, 0.9f));
+    drone("leader_truth", "leader", 0.42, 0.9f, 0.1f, 0.1f);           // = leader model in the SDF
+    drone("follower", "follower_truth", 0.37, 0.1f, 0.3f, 0.9f);       // = follower model in the SDF
     pub_mk_->publish(arr);
   }
 
@@ -187,6 +232,9 @@ class MonitorNode : public rclcpp::Node {
   follow_me_ros::GimbalState gimbal_;
   std::optional<TargetEstimate> est_;
   std::optional<double> t_start_;
+  std::string phase_, phase_log_;
+  double t_follow_start_ = -1.0;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_phase_;
   std::deque<Vec3> trail_l_, trail_f_;
   int n_total_ = 0, n_valid_ = 0, n_frame_ = 0, n_steady_ = 0;
   double s_ep2_ = 0, s_ev2_ = 0, s_nees_ = 0, s_derr2_ = 0, min_dist_ = 1e9, t_below_ = 0;

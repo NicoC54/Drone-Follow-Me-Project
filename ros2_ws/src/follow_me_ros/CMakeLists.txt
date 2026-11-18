@@ -23,7 +23,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
 set(ROS_DEPS rclcpp std_msgs geometry_msgs nav_msgs sensor_msgs visualization_msgs follow_me_msgs ros_gz_interfaces)
 
-foreach(node leader_node detector_node tracker_node follow_node monitor_node)
+foreach(node leader_node detector_node tracker_node follow_node monitor_node radar_node fusion_node intercept_node)
   add_executable(${node} src/${node}.cpp)
   target_include_directories(${node} PRIVATE include)
   target_link_libraries(${node} follow_me_core::follow_me_core)

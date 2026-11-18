@@ -4,11 +4,18 @@
 #include <optional>
 #include <rclcpp/rclcpp.hpp>
 
+#include "follow_me_core/intercept_sim.hpp"
 #include "follow_me_core/sim_models.hpp"
 
 class LeaderNode : public rclcpp::Node {
  public:
-  LeaderNode() : Node("leader_node"), leader_(follow_me::LeaderParams{}) {
+  // scenario "follow" (phases 1-3, default) or "intercept" (phase 4: unknown drone seen by the
+  // ground radar ~480 m away; the Gazebo model must start with the same pose and heading).
+  static follow_me::LeaderParams scenario(const std::string& name) {
+    return name == "intercept" ? follow_me::InterceptConfig().base.leader : follow_me::LeaderParams{};
+  }
+
+  LeaderNode() : Node("leader_node"), leader_(scenario(declare_parameter("scenario", std::string("follow")))) {
     start_delay_ = declare_parameter("start_delay", 5.0);  // time for the follower to lock on
     duration_ = declare_parameter("duration", 90.0);       // then hover
     const double rate = declare_parameter("rate_hz", 50.0);

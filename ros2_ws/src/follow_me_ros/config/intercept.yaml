@@ -1,0 +1,27 @@
+# Phase 4 (radar-cued interception of an unknown drone). Loaded AFTER follow_me.yaml:
+# only the differences are listed here.
+/**:
+  ros__parameters:
+    scenario: intercept          # leader_node: intercept flight plan
+    start_delay: 2.0             # leader_node
+    mode: silhouette             # detector_node: no colour beacon any more
+    camera:
+      max_range: 400.0
+    guidance:
+      height_offset: -2.0        # follow 2 m BELOW the target: silhouette against the sky
+    radar:
+      position: [-60.0, -40.0, 3.0]
+      scan_rate: 2.0
+      latency: 0.3
+      clutter_per_scan: 1.0
+    fusion:
+      q_accel: 3.0
+      size_prior: 0.5
+      size_prior_sigma: 0.4
+    intercept:
+      approach_speed: 12.0
+      handover_range: 80.0
+      handover_speed: 4.0
+      blind_hold_range: 25.0
+    silhouette:
+      dark_ratio: 0.65
