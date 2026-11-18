@@ -10,7 +10,10 @@
 #include <vector>
 
 #include "follow_me_core/camera_model.hpp"
+#include "follow_me_core/fusion_tracker.hpp"
+#include "follow_me_core/mission.hpp"
 #include "follow_me_core/params.hpp"
+#include "follow_me_core/radar_model.hpp"
 
 namespace follow_me_ros {
 
@@ -159,6 +162,42 @@ inline follow_me::GimbalParams declareGimbal(rclcpp::Node& n) {
   g.pitch_max_deg = n.declare_parameter("gimbal.pitch_max_deg", g.pitch_max_deg);
   g.search_rate_deg = n.declare_parameter("gimbal.search_rate_deg", g.search_rate_deg);
   return g;
+}
+
+inline follow_me::GroundRadarParams declareRadar(rclcpp::Node& n) {
+  follow_me::GroundRadarParams r;
+  r.position = declareVec3(n, "radar.position", r.position);
+  r.scan_rate = n.declare_parameter("radar.scan_rate", r.scan_rate);
+  r.latency = n.declare_parameter("radar.latency", r.latency);
+  r.max_range = n.declare_parameter("radar.max_range", r.max_range);
+  r.sigma_range = n.declare_parameter("radar.sigma_range", r.sigma_range);
+  r.sigma_az_deg = n.declare_parameter("radar.sigma_az_deg", r.sigma_az_deg);
+  r.sigma_el_deg = n.declare_parameter("radar.sigma_el_deg", r.sigma_el_deg);
+  r.sigma_rdot = n.declare_parameter("radar.sigma_rdot", r.sigma_rdot);
+  r.p_detect = n.declare_parameter("radar.p_detect", r.p_detect);
+  r.clutter_per_scan = n.declare_parameter("radar.clutter_per_scan", r.clutter_per_scan);
+  return r;
+}
+
+inline follow_me::FusionParams declareFusion(rclcpp::Node& n) {
+  follow_me::FusionParams f;
+  f.q_accel = n.declare_parameter("fusion.q_accel", f.q_accel);
+  f.coast_time = n.declare_parameter("fusion.coast_time", f.coast_time);
+  f.lost_time = n.declare_parameter("fusion.lost_time", f.lost_time);
+  f.lock_count = n.declare_parameter("fusion.lock_count", f.lock_count);
+  f.size_prior = n.declare_parameter("fusion.size_prior", f.size_prior);
+  f.size_prior_sigma = n.declare_parameter("fusion.size_prior_sigma", f.size_prior_sigma);
+  return f;
+}
+
+inline follow_me::InterceptParams declareIntercept(rclcpp::Node& n) {
+  follow_me::InterceptParams i;
+  i.approach_speed = n.declare_parameter("intercept.approach_speed", i.approach_speed);
+  i.handover_range = n.declare_parameter("intercept.handover_range", i.handover_range);
+  i.handover_speed = n.declare_parameter("intercept.handover_speed", i.handover_speed);
+  i.blind_hold_range = n.declare_parameter("intercept.blind_hold_range", i.blind_hold_range);
+  i.lock_lost_time = n.declare_parameter("intercept.lock_lost_time", i.lock_lost_time);
+  return i;
 }
 
 }  // namespace follow_me_ros
