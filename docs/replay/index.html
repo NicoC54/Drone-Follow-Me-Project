@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interception Replay 3D</title>
+<meta name="description" content="Interactive 3D replay of a radar-cued interception of an unknown drone, then camera follow (drone-follow-me, phase 4).">
+<style>
+  :root {
+    --surface: #fcfcfb; --panel: rgba(252,252,251,0.92); --ink: #0b0b0b; --ink2: #52514e; --muted: #8a8984;
+    --line: #e6e5e1; --accent: #2a78d6; --sky-top: #dfe9f3; --sky-bottom: #f6f4ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #151515; --panel: rgba(28,28,27,0.92); --ink: #f2f1ed; --ink2: #b9b8b3; --muted: #8a8984;
+      --line: #34332f; --accent: #5a9be6; --sky-top: #1b2430; --sky-bottom: #2a2a28;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #151515; --panel: rgba(28,28,27,0.92); --ink: #f2f1ed; --ink2: #b9b8b3; --muted: #8a8984;
+    --line: #34332f; --accent: #5a9be6; --sky-top: #1b2430; --sky-bottom: #2a2a28;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--surface); color: var(--ink);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 0; }
+  #view canvas { display: block; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(6px); }
+  #info { top: 16px; left: 16px; width: min(320px, calc(100vw - 32px)); padding: 14px 16px; }
+  #info h1 { font-size: 15px; margin: 0 0 2px; }
+  #info .sub { color: var(--ink2); font-size: 12px; margin-bottom: 10px; }
+  .phase { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 16px; }
+  .phase i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .phase-help { color: var(--ink2); font-size: 12px; min-height: 34px; margin: 4px 0 10px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+  dt { color: var(--ink2); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+  #legend { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink2);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+  #legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 6px; vertical-align: -1px; background: var(--c); }
+  #controls { left: 16px; right: 16px; bottom: 16px; padding: 10px 14px; display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap; }
+  button, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #scrub-wrap { flex: 1 1 260px; position: relative; height: 28px; }
+  #bands { position: absolute; left: 0; right: 0; top: 11px; height: 6px; border-radius: 3px; overflow: hidden; display: flex; }
+  #scrub { position: absolute; inset: 0; width: 100%; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; }
+  #scrub::-webkit-slider-runnable-track { height: 28px; background: transparent; }
+  #scrub::-moz-range-track { height: 28px; background: transparent; }
+  #scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 22px; margin-top: 3px; border-radius: 4px;
+    background: var(--ink); border: 2px solid var(--surface); }
+  #scrub::-moz-range-thumb { width: 12px; height: 20px; border-radius: 4px; background: var(--ink); border: 2px solid var(--surface); }
+  #time { font-variant-numeric: tabular-nums; color: var(--ink2); min-width: 92px; text-align: right; }
+  #msg { position: fixed; inset: 0; display: grid; place-items: center; color: var(--ink2); pointer-events: none; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 8px; }
+  @media (max-width: 640px) {
+    #info { padding: 10px 12px; }
+    #legend, .hint, .phase-help { display: none; }
+    #controls { gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="msg">loading replay.json…</div>
+
+<div id="info" class="panel">
+  <h1>Radar-cued interception</h1>
+  <div class="sub">An unknown drone is picked up by a ground radar; the follower flies to the predicted
+    intercept point, hands over to its camera, learns the target size, then follows it at a safe distance.</div>
+  <div class="phase"><i id="phase-dot"></i><span id="phase">–</span></div>
+  <div class="phase-help" id="phase-help"></div>
+  <dl>
+    <dt>distance to target</dt><dd id="d-dist">–</dd>
+    <dt>tracking</dt><dd id="d-track">–</dd>
+    <dt>estimate error</dt><dd id="d-err">–</dd>
+    <dt>learnt target size</dt><dd id="d-size">–</dd>
+    <dt>time to intercept</dt><dd id="d-tgo">–</dd>
+  </dl>
+  <div id="legend">
+    <span style="--c:#2a78d6">follower</span>
+    <span style="--c:#e34948">unknown drone</span>
+    <span style="--c:#e87ba4">radar plot (target)</span>
+    <span style="--c:#9a9994">radar clutter / own echo</span>
+    <span style="--c:#eb6834">predicted intercept</span>
+    <span style="--c:#1baf7a">estimate 3σ</span>
+  </div>
+  <div class="hint">Drag to orbit, scroll to zoom. Space: play/pause, ←/→: step.</div>
+</div>
+
+<div id="controls" class="panel">
+  <button id="play" aria-label="Play or pause">Pause</button>
+  <select id="speed" aria-label="Playback speed">
+    <option value="1">1×</option><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option>
+  </select>
+  <select id="cam" aria-label="Camera">
+    <option value="chase" selected>Chase camera</option>
+    <option value="overview">Overview</option>
+    <option value="free">Free orbit</option>
+  </select>
+  <div id="scrub-wrap"><div id="bands"></div><input id="scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Time"></div>
+  <div id="time">0.0 s</div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const PHASE_HELP = [
+  "Waiting for a confirmed radar track.",
+  "Flying at 14 m/s towards the predicted intercept point (radar-only estimate, several metres of error).",
+  "Slowing down near the target; the camera searches in the radar-cued window.",
+  "Camera locked and size learnt: radar + camera fusion, follow at 8 m behind and 2 m above.",
+  "Track lost: hold position."
+];
+
+// ENU (sim) -> three.js (y up): (x, y, z) -> (x, z, -y)
+const enu = (x, y, z) => new THREE.Vector3(x, z, -y);
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const msg = document.getElementById("msg");
+
+let D;
+try {
+  D = await (await fetch("replay.json")).json();
+} catch (e) {
+  msg.textContent = "Could not load replay.json (serve this folder over HTTP, e.g. python3 -m http.server).";
+  throw e;
+}
+msg.remove();
+const N = D.t.length;
+const at = (arr, i) => enu(arr[0][i], arr[1][i], arr[2][i]);
+
+// ---------------- scene ----------------
+const view = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.5, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+function applyTheme() {
+  scene.background = new THREE.Color(css("--sky-bottom"));
+  scene.fog = new THREE.Fog(css("--sky-bottom"), 400, 1600);
+}
+applyTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a80, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(200, 400, 100);
+scene.add(sun);
+
+// ground: subtle grid every 50 m
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000),
+  new THREE.MeshLambertMaterial({ color: 0xc9c6b8 }));
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+const grid = new THREE.GridHelper(4000, 80, 0xa9a69a, 0xb8b5a9);
+grid.position.y = 0.05;
+scene.add(grid);
+
+// radar mast + dish
+const [rx, ry, rz] = D.radar_site;
+const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, rz, 12), new THREE.MeshLambertMaterial({ color: 0x52514e }));
+mast.position.copy(enu(rx, ry, rz / 2));
+scene.add(mast);
+const dish = new THREE.Mesh(new THREE.SphereGeometry(2.2, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2.4),
+  new THREE.MeshLambertMaterial({ color: 0xdedcd4, side: THREE.DoubleSide }));
+dish.position.copy(enu(rx, ry, rz + 0.6));
+scene.add(dish);
+
+// quadrotor X model, arm length scaled to `span` metres (visual size exaggerated far away)
+function makeQuad(color, span) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.28 * span, 0.12 * span, 0.28 * span),
+    new THREE.MeshLambertMaterial({ color }));
+  g.add(body);
+  const armMat = new THREE.MeshLambertMaterial({ color: 0x2b2b2a });
+  const rotors = [];
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.62 * span, 0.04 * span, 0.05 * span), armMat);
+    arm.position.set(Math.cos(a) * 0.31 * span, 0, Math.sin(a) * 0.31 * span);
+    arm.rotation.y = -a;
+    g.add(arm);
+    const rotor = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * span, 0.24 * span, 0.01 * span, 24),
+      new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.35 }));
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.46 * span, 0.012 * span, 0.04 * span),
+      new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+    rotor.add(disc, blade);
+    rotor.position.set(Math.cos(a) * 0.62 * span, 0.07 * span, Math.sin(a) * 0.62 * span);
+    rotor.userData.dir = k % 2 ? 1 : -1;
+    g.add(rotor);
+    rotors.push(rotor);
+  }
+  g.userData.rotors = rotors;
+  scene.add(g);
+  return g;
+}
+const follower = makeQuad(0x2a78d6, 1.0);
+const leader = makeQuad(0xe34948, 1.0);
+
+// trails: follower coloured by phase, leader red
+function trail(points, colors) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+  if (colors) geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const mat = new THREE.LineBasicMaterial(colors ? { vertexColors: true } : { color: 0xe34948 });
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  return line;
+}
+const fp = [], fc = [], lp = [];
+for (let i = 0; i < N; i++) {
+  const f = at(D.follower, i), l = at(D.leader, i);
+  fp.push(f.x, f.y, f.z); lp.push(l.x, l.y, l.z);
+  const c = new THREE.Color(D.phase_colors[D.phase[i]]);
+  fc.push(c.r, c.g, c.b);
+}
+const fTrail = trail(fp, fc), lTrail = trail(lp, null);
+
+// drop lines to the ground (depth cue)
+function dropLine(color) {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const l = new THREE.Line(geo, new THREE.LineDashedMaterial({ color, dashSize: 1, gapSize: 1, transparent: true, opacity: 0.5 }));
+  scene.add(l);
+  return l;
+}
+const fDrop = dropLine(0x2a78d6), lDrop = dropLine(0xe34948);
+function setDrop(line, p) {
+  line.geometry.setFromPoints([p, new THREE.Vector3(p.x, 0.1, p.z)]);
+  line.computeLineDistances();
+}
+
+// estimate: 3-sigma ellipsoid
+const ell = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16),
+  new THREE.MeshLambertMaterial({ color: 0xeb6834, transparent: true, opacity: 0.25, depthWrite: false }));
+scene.add(ell);
+
+// predicted intercept point + line of sight to it
+const aim = new THREE.Mesh(new THREE.OctahedronGeometry(1.6), new THREE.MeshLambertMaterial({ color: 0xeb6834 }));
+scene.add(aim);
+const aimLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineDashedMaterial({ color: 0xeb6834, dashSize: 3, gapSize: 2 }));
+scene.add(aimLine);
+
+// radar plots of the last 3 s (instanced spheres, fading)
+const RKIND = [0x9a9994, 0xe87ba4, 0x52514e];
+const plots = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8),
+  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85 }), 64);
+const MAXP = 64;
+plots.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+const tmpM = new THREE.Matrix4(), tmpC = new THREE.Color();
+for (let k = 0; k < MAXP; k++) plots.setColorAt(k, tmpC.set(RKIND[0]));  // allocate instance colours up front
+plots.count = 0;
+scene.add(plots);
+
+// ---------------- helpers ----------------
+function covEllipsoid(i) {
+  const [xx, xy, xz, yy, yz, zz] = D.cov.map(a => a[i]);
+  // ENU covariance -> three axes: A P A^T with A = [[1,0,0],[0,0,1],[0,-1,0]]
+  const P = [[xx, xz, -xy], [xz, zz, -yz], [-xy, -yz, yy]];
+  // Jacobi eigen-decomposition of the 3x3 symmetric matrix
+  const V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], A = P.map(r => r.slice());
+  for (let sweep = 0; sweep < 8; sweep++) {
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+      if (Math.abs(A[p][q]) < 1e-12) continue;
+      const th = 0.5 * Math.atan2(2 * A[p][q], A[q][q] - A[p][p]);
+      const c = Math.cos(th), s = Math.sin(th);
+      for (let k = 0; k < 3; k++) { const a = A[k][p], b = A[k][q]; A[k][p] = c * a - s * b; A[k][q] = s * a + c * b; }
+      for (let k = 0; k < 3; k++) { const a = A[p][k], b = A[q][k]; A[p][k] = c * a - s * b; A[q][k] = s * a + c * b; }
+      for (let k = 0; k < 3; k++) { const a = V[k][p], b = V[k][q]; V[k][p] = c * a - s * b; V[k][q] = s * a + c * b; }
+    }
+  }
+  const m = new THREE.Matrix4().set(V[0][0], V[0][1], V[0][2], 0, V[1][0], V[1][1], V[1][2], 0, V[2][0], V[2][1], V[2][2], 0, 0, 0, 0, 1);
+  if (m.determinant() < 0) m.elements[0] *= -1, m.elements[1] *= -1, m.elements[2] *= -1;
+  const sc = [0, 1, 2].map(k => Math.max(0.15, 3 * Math.sqrt(Math.max(A[k][k], 0))));
+  return { q: new THREE.Quaternion().setFromRotationMatrix(m), s: new THREE.Vector3(...sc) };
+}
+
+function leaderHeading(i) {
+  const j = Math.min(i + 1, N - 1), k = Math.max(j - 2, 0);
+  const vx = D.leader[0][j] - D.leader[0][k], vy = D.leader[1][j] - D.leader[1][k];
+  return Math.atan2(vy, vx);
+}
+
+// ---------------- UI ----------------
+const $ = id => document.getElementById(id);
+const scrub = $("scrub"), playBtn = $("play"), speedSel = $("speed"), camSel = $("cam");
+scrub.max = String(N - 1);
+// phase bands under the scrubber
+{
+  const bands = $("bands");
+  let start = 0;
+  for (let i = 1; i <= N; i++) {
+    if (i === N || D.phase[i] !== D.phase[start]) {
+      const b = document.createElement("div");
+      b.style.flex = String(i - start);
+      b.style.background = D.phase_colors[D.phase[start]];
+      b.title = D.phase_names[D.phase[start]];
+      bands.appendChild(b);
+      start = i;
+    }
+  }
+}
+let playing = true, t = 0, lastFrame = performance.now();
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "Pause" : "Play"; };
+scrub.oninput = () => { t = D.t[+scrub.value]; };
+addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.code === "Space") { e.preventDefault(); playBtn.click(); }
+  if (e.code === "ArrowRight") t = Math.min(t + 1, D.t[N - 1]);
+  if (e.code === "ArrowLeft") t = Math.max(t - 1, 0);
+});
+camSel.onchange = () => { if (camSel.value === "overview") setOverview(); };
+function setOverview() {
+  const c = enu(150, 100, 0);
+  controls.target.copy(c);
+  camera.position.copy(c.clone().add(new THREE.Vector3(-250, 380, 420)));
+}
+setOverview();
+const chaseOffset = new THREE.Vector3(-14, 7, 14);
+
+// ---------------- frame update ----------------
+function update(i, frac, dtReal) {
+  const j = Math.min(i + 1, N - 1);
+  const fP = at(D.follower, i).lerp(at(D.follower, j), frac);
+  const lP = at(D.leader, i).lerp(at(D.leader, j), frac);
+  follower.position.copy(fP);
+  leader.position.copy(lP);
+  // follower attitude from the simulated quaternion (ENU body -> three)
+  const [qw, qx, qy, qz] = D.follower_q.map(a => a[i]);
+  follower.quaternion.set(qx, qz, -qy, qw);
+  leader.rotation.set(0, leaderHeading(i), 0);
+  // visual scale: real size near, exaggerated far away so both stay visible
+  const camD = camera.position.distanceTo(fP);
+  const s = Math.max(1, camD / 60);
+  follower.scale.setScalar(s); leader.scale.setScalar(s * D.true_size / 0.6);
+  for (const q of [follower, leader]) for (const r of q.userData.rotors) r.rotation.y += r.userData.dir * dtReal * 60;
+  setDrop(fDrop, fP); setDrop(lDrop, lP);
+
+  const ph = D.phase[i];
+  fTrail.geometry.setDrawRange(0, i + 1);
+  lTrail.geometry.setDrawRange(0, i + 1);
+
+  const tracked = D.track[i] > 0;
+  ell.visible = tracked;
+  if (tracked) {
+    const e = at(D.estimate, i);
+    const { q, s: sc } = covEllipsoid(i);
+    ell.position.copy(e); ell.quaternion.copy(q); ell.scale.copy(sc);
+    ell.material.color.set(D.locked[i] ? 0x1baf7a : 0xeb6834);
+  }
+  const showAim = tracked && (ph === 1 || ph === 2);
+  aim.visible = aimLine.visible = showAim;
+  if (showAim) {
+    const a = at(D.aim, i);
+    aim.position.copy(a); aim.rotation.y += dtReal;
+    aim.scale.setScalar(Math.max(1, camera.position.distanceTo(a) / 80));
+    aimLine.geometry.setFromPoints([fP, a]); aimLine.computeLineDistances();
+  }
+
+  // radar plots of the last 3 s
+  const tn = D.t[i];
+  let n = 0;
+  for (let k = 0; k < D.radar.t.length && n < MAXP; k++) {
+    const age = tn - D.radar.t[k];
+    if (age < 0 || age > 3) continue;
+    const p = enu(D.radar.x[k], D.radar.y[k], D.radar.z[k]);
+    const r = Math.max(0.5, camera.position.distanceTo(p) / 160) * (1 - age / 4);
+    tmpM.makeScale(r, r, r).setPosition(p);
+    plots.setMatrixAt(n, tmpM);
+    plots.setColorAt(n, tmpC.set(RKIND[D.radar.kind[k]]));
+    n++;
+  }
+  plots.count = n;
+  plots.instanceMatrix.needsUpdate = true;
+  if (plots.instanceColor) plots.instanceColor.needsUpdate = true;
+
+  // camera
+  if (camSel.value === "chase") {
+    const look = fP.clone().lerp(lP, 0.5);
+    const back = fP.clone().sub(lP); back.y = 0;
+    const far = Math.min(back.length(), 120);
+    back.normalize().multiplyScalar(18 + 0.6 * far);
+    const want = fP.clone().add(back).add(new THREE.Vector3(0, 8 + 0.3 * far, 0));
+    camera.position.lerp(want, Math.min(1, dtReal * 2));
+    controls.target.lerp(look, Math.min(1, dtReal * 3));
+  }
+
+  // panel
+  $("phase").textContent = D.phase_names[ph];
+  $("phase-dot").style.background = D.phase_colors[ph];
+  $("phase-help").textContent = PHASE_HELP[ph];
+  $("d-dist").textContent = `${D.dist[i].toFixed(1)} m`;
+  $("d-track").textContent = D.locked[i] ? "radar + camera" : (tracked ? "radar only" : "no track");
+  const err = tracked ? at(D.estimate, i).distanceTo(at(D.leader, i)) : NaN;
+  $("d-err").textContent = tracked ? `${err.toFixed(2)} m` : "–";
+  $("d-size").textContent = D.size_sigma[i] < 0.25 ? `${D.size[i].toFixed(2)} ± ${(2 * D.size_sigma[i]).toFixed(2)} m (true ${D.true_size} m)` : "unknown";
+  $("d-tgo").textContent = showAim && D.t_go[i] > 0 ? `${D.t_go[i].toFixed(0)} s` : "–";
+  $("time").textContent = `${tn.toFixed(1)} / ${D.t[N - 1].toFixed(0)} s`;
+  scrub.value = String(i);
+}
+
+function loop(now) {
+  const dtReal = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  if (playing) {
+    t += dtReal * (+speedSel.value);
+    if (t >= D.t[N - 1]) t = 0;
+  }
+  const f = t / D.dt, i = Math.min(Math.floor(f), N - 1);
+  update(i, f - i, dtReal);
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
