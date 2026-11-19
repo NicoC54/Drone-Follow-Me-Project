@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <random>
+#include <limits>
 
 #include "follow_me_core/fusion_tracker.hpp"
 
@@ -150,7 +152,10 @@ TEST(FusionTracker, IgnoresBlobsThatCannotBeTheTarget) {
   const auto ref = run(w, radar_only, false);
   const auto tr = run(w, with_clutter, false);
   EXPECT_EQ(tr.stats().cam_used, 0);
-  EXPECT_TRUE(tr.predictedAt(30.0).x().isApprox(ref.predictedAt(30.0).x(), 1e-9));  // = radar alone
+  // = radar alone. (Not to 1e-9: every camera frame still triggers an IMM prediction step, and
+  // IMM mixing is not invariant to how a prediction interval is split.)
+  const double sigma = std::sqrt(ref.predictedAt(30.0).positionCov().trace());
+  EXPECT_LT((tr.predictedAt(30.0).position() - ref.predictedAt(30.0).position()).norm(), 0.05 * sigma);
 
   // (2) Close (~16 m): a 250 px blob on the target bearing would be a 10 m object. (The gate is
   // conservative: depth taken 3 sigma closer, so a merely "too big" 4 m blob may pass early on.)
@@ -167,4 +172,149 @@ TEST(FusionTracker, IgnoresBlobsThatCannotBeTheTarget) {
   const auto tr2 = run(w, close, false);
   EXPECT_EQ(tr2.stats().cam_used, 0);
   EXPECT_GT(tr2.stats().cam_rejected, 500);
+}
+
+TEST(TargetImm, SingleModelIsTheEkfAndManoeuvreProbabilityRisesInATurn) {
+  Vec6 x0;
+  x0 << 0, 0, 40, 8, 0, 0;
+  const Mat6 P0 = Mat6::Identity();
+  // (1) one model: identical to the plain constant-velocity EKF
+  TargetImm one({TargetEkfCA(TargetEkfCA::Model::CV, 3.0)}, {1e9}, {1.0});
+  TargetEkf ekf(3.0);
+  one.reset(x0, P0);
+  ekf.reset(x0, P0);
+  for (int k = 0; k < 10; ++k) {
+    one.predict(0.1);
+    ekf.predict(0.1);
+  }
+  EXPECT_TRUE(one.combined().x().isApprox(ekf.x(), 1e-12));
+  EXPECT_TRUE(one.combined().P().isApprox(ekf.P(), 1e-12));
+  // (2) two models, position measurements of a target that flies straight then turns hard
+  TargetImm imm({TargetEkfCA(TargetEkfCA::Model::CV, 3.0), TargetEkfCA(TargetEkfCA::Model::Singer, 30.0, 3.0)},
+                {10.0, 4.0}, {0.7, 0.3});
+  imm.reset(x0, P0);
+  std::mt19937_64 rng(3);
+  std::normal_distribution<double> n(0.0, 0.3);
+  Vec3 p(0, 0, 40), v(8, 0, 0);
+  double mu_straight = 0, mu_turn = 0;
+  for (int k = 1; k <= 200; ++k) {  // 20 s at 10 Hz; 8 m/s^2 turn from t = 10 s
+    const double dt = 0.1;
+    if (k > 100) v += dt * Vec3(-v.y(), v.x(), 0).normalized() * 8.0;
+    p += dt * v;
+    imm.predict(dt);
+    const Vec3 z = p + Vec3(n(rng), n(rng), n(rng));
+    imm.update([&](TargetEkfCA& m) {
+      Eigen::Matrix<double, 3, 9> H = Eigen::Matrix<double, 3, 9>::Zero();
+      H.leftCols<3>().setIdentity();
+      const Vec3 y = z - m.position();
+      const Mat3 R = 0.09 * Mat3::Identity();
+      const double ll = innovationLogLikelihood<3>(y, Mat3(H * m.P() * H.transpose() + R));
+      m.updateGeneric<3>(y, H, R, std::numeric_limits<double>::infinity());
+      return ll;
+    });
+    if (k > 50 && k <= 100) mu_straight += imm.mu()[1] / 50.0;
+    if (k > 110 && k <= 160) mu_turn += imm.mu()[1] / 50.0;
+  }
+  std::printf("  manoeuvre probability: straight %.2f, turn %.2f\n", mu_straight, mu_turn);
+  EXPECT_LT(mu_straight, 0.2);
+  EXPECT_GT(mu_turn, 2.0 * mu_straight + 0.2);  // clearly detects the manoeuvre
+}
+
+TEST(TargetEkf, BearingUpdateKeepsTheRange) {
+  TargetEkf e(3.0);
+  Vec6 x;
+  x << 30, 0, 40, 0, 0, 0;
+  e.reset(x, 4.0 * Mat6::Identity());
+  const Vec3 cam(0, 0, 40);
+  const Vec3 los = (e.position() - cam).normalized();
+  Eigen::Matrix<double, 2, 6> H = Eigen::Matrix<double, 2, 6>::Zero();
+  H(0, 1) = 400.0 / 30.0;  // bearing sensitivities of a camera looking along +x
+  H(1, 2) = -400.0 / 30.0;
+  e.updateBearingKeepRange(Eigen::Vector2d(20.0, -10.0), H, Eigen::Matrix2d::Identity(), los);
+  EXPECT_NEAR((e.position() - cam).dot(los), 30.0, 1e-9);   // range untouched
+  EXPECT_GT((e.position() - x.head<3>()).norm(), 0.5);      // cross-range corrected
+  EXPECT_NEAR(los.dot(e.positionCov() * los), 4.0, 1e-9);   // range variance untouched
+}
+
+// A target that brakes from 8 m/s to a hover at 2.5 m/s^2. Measured trade-off (the reason why the
+// default IMM keeps two constant-velocity models): a Singer acceleration model SEES the braking,
+// but it also "sees" accelerations in the noise while the target flies steadily; the IMM mixture
+// stays quiet in steady flight. (Closed loop: feeding this acceleration to the guidance followed
+// tighter but made the follower work harder, so it is not used by default.)
+TEST(TargetImm, AccelerationModelsTradeBrakingDetectionForSteadyNoise) {
+  auto run = [](TargetImm imm) {
+    Vec6 x0;
+    x0 << 0, 0, 40, 8, 0, 0;
+    imm.reset(x0, Mat6::Identity());
+    std::mt19937_64 rng(5);
+    std::normal_distribution<double> n(0.0, 0.3);
+    Vec3 p(0, 0, 40), v(8, 0, 0);
+    double a_brake = 0, a2_steady = 0;
+    int kb = 0, ks = 0;
+    for (int k = 1; k <= 300; ++k) {  // 30 Hz position measurements, braking from t = 5 s
+      const double dt = 1.0 / 30.0, t = k * dt;
+      if (t > 5.0 && v.x() > 0) v.x() = std::max(0.0, v.x() - 2.5 * dt);
+      p += dt * v;
+      imm.predict(dt);
+      const Vec3 z = p + Vec3(n(rng), n(rng), n(rng));
+      imm.update([&](TargetEkfCA& m) {
+        Eigen::Matrix<double, 3, 9> H = Eigen::Matrix<double, 3, 9>::Zero();
+        H.leftCols<3>().setIdentity();
+        const Mat3 R = 0.09 * Mat3::Identity();
+        const Vec3 y = z - m.position();
+        const double ll = innovationLogLikelihood<3>(y, Mat3(H * m.P() * H.transpose() + R));
+        m.updateGeneric<3>(y, H, R, std::numeric_limits<double>::infinity());
+        return ll;
+      });
+      const auto c = imm.combined9();
+      if (t > 5.5 && t < 7.5) a_brake += c.acceleration().x(), ++kb;
+      if (t > 2.0 && t < 5.0) a2_steady += c.acceleration().squaredNorm(), ++ks;
+    }
+    return std::pair<double, double>{a_brake / kb, std::sqrt(a2_steady / ks)};
+  };
+  using M = TargetEkfCA::Model;
+  const auto singer = run(TargetImm({TargetEkfCA(M::Singer, 10.0, 3.0)}, {1e9}, {1.0}));
+  const auto mix = run(TargetImm({TargetEkfCA(M::CV, 3.0), TargetEkfCA(M::Singer, 10.0, 3.0)}, {10.0, 4.0},
+                                 {0.7, 0.3}));
+  std::printf("  braking -2.5 m/s^2 seen as: Singer %.2f, IMM %.2f | steady-flight |a| rms: Singer %.2f, IMM %.2f\n",
+              singer.first, mix.first, singer.second, mix.second);
+  EXPECT_LT(singer.first, -1.5);            // the Singer model sees the braking...
+  EXPECT_GT(singer.second, 1.0);            // ...and noise as acceleration in steady flight
+  EXPECT_LT(mix.second, 0.5);               // the IMM stays quiet in steady flight...
+  EXPECT_GT(mix.first, singer.first);       // ...and sees less of the braking
+}
+
+// Trilateration: a second ground radar whose lines of sight cross the first one's turns its
+// precise RANGES into cross-range information. Radar-only track of a target ~350-400 m away.
+TEST(FusionTracker, ASecondRadarSiteCutsTheCrossRangeError) {
+  auto run = [](bool two) {
+    World w;
+    GroundRadarParams r2 = w.rp;
+    r2.position = Vec3(450.0, -100.0, 3.0);
+    GroundRadarSim sim1(w.rp, 11), sim2(r2, 12);
+    FusionTracker tr(FusionParams{}, w.cp, w.rp);
+    double s2 = 0;
+    int n = 0;
+    for (double t = 0.0; t < 40.0; t += 0.25) {  // interleaved scans, 2 Hz each
+      const bool second = two && std::fmod(t, 0.5) > 0.1;
+      if (!two && std::fmod(t, 0.5) > 0.1) continue;
+      FusionTracker::RadarObs o;
+      const Vec3 pf = w.follower(t, false);
+      o.plots = (second ? sim2 : sim1).scan(t, {{w.target(t), w.targetVel(t), true, false},
+                                                {pf, Vec3::Zero(), false, true}}).plots;
+      o.own_pos = pf;
+      o.own_P = 0.04 * Mat3::Identity();
+      o.site = second ? r2.position : w.rp.position;
+      tr.onRadar(t, o);
+      tr.updateStatus(t);
+      if (t > 10.0 && tr.hasEstimate()) {
+        s2 += (tr.predictedAt(t).position() - w.target(t)).head<2>().squaredNorm();
+        ++n;
+      }
+    }
+    return std::sqrt(s2 / n);
+  };
+  const double one = run(false), two = run(true);
+  std::printf("  horizontal error, radar only: 1 radar %.2f m, 2 radars %.2f m\n", one, two);
+  EXPECT_LT(two, 0.6 * one);
 }

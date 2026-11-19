@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace follow_me {
 
@@ -9,9 +10,28 @@ FusionTracker::FusionTracker(const FusionParams& p, const CameraParams& cam,
                              const GroundRadarParams& radar)
     : p_(p), cam_prm_(cam), radar_prm_(radar), R_radar_(radarNoiseCov(radar)) {
   c_.ekf = TargetEkf(p.q_accel);
+  c_.imm = makeImm();
   c_.W = p.size_prior;
   c_.W_var = p.size_prior_sigma * p.size_prior_sigma;
   base_ = c_;
+}
+
+TargetImm FusionTracker::makeImm() const {
+  using M = TargetEkfCA::Model;
+  const std::vector<double> soj{p_.sojourn_calm, p_.sojourn_manoeuvre};
+  const std::vector<double> mu0{1.0 - p_.mu0_manoeuvre, p_.mu0_manoeuvre};
+  if (p_.model == "cv") return TargetImm({TargetEkfCA(M::CV, p_.q_accel)}, {1e9}, {1.0});
+  if (p_.model == "singer") return TargetImm({TargetEkfCA(M::Singer, p_.q_jerk, p_.singer_tau)}, {1e9}, {1.0});
+  if (p_.model == "imm_cv")
+    return TargetImm({TargetEkfCA(M::CV, p_.q_calm), TargetEkfCA(M::CV, p_.q_cv_manoeuvre)}, soj, mu0);
+  return TargetImm({TargetEkfCA(M::CV, p_.q_calm), TargetEkfCA(M::Singer, p_.q_jerk, p_.singer_tau)}, soj, mu0);
+}
+
+Vec3 FusionTracker::accelerationAt(double t) const {
+  if (!hasEstimate()) return Vec3::Zero();
+  TargetImm imm = c_.imm;
+  if (std::isfinite(c_.t_filter) && t > c_.t_filter) imm.predict(t - c_.t_filter);
+  return imm.combined9().acceleration();
 }
 
 void FusionTracker::onCamera(double t, const CameraObs& obs) { add({t, obs}); }
@@ -50,8 +70,10 @@ void FusionTracker::add(Entry e) {
 }
 
 void FusionTracker::process(Core& c, const Entry& e) const {
-  if (c.status != TrackStatus::Search && std::isfinite(c.t_filter) && e.t > c.t_filter)
-    c.ekf.predict(e.t - c.t_filter);
+  if (c.status != TrackStatus::Search && std::isfinite(c.t_filter) && e.t > c.t_filter) {
+    c.imm.predict(e.t - c.t_filter);
+    c.ekf = c.imm.combined();
+  }
   if (!std::isfinite(c.t_filter) || e.t > c.t_filter) c.t_filter = e.t;
   if (e.t > c.t_W) {  // the apparent size of a drone changes slowly with the aspect angle
     c.W_var += p_.size_process * p_.size_process * (e.t - c.t_W);
@@ -96,8 +118,10 @@ void FusionTracker::processCamera(Core& c, double t, const CameraObs& o) const {
   }
   if (use_size) {  // the size prediction f*W/z inherits the uncertainty of W, plus the aspect
     const double ds = cp.fx * std::sqrt(c.W_var) / rc.z();
+    const double dt_cam = std::max(t - c.t_last_size_cam, 1e-3);
+    const double corr = std::max(1.0, 2.0 * p_.size_aspect_tau / dt_cam);
     const double da = p_.size_rel_noise * o.z(2);
-    R_extra(2, 2) += ds * ds + da * da;
+    R_extra(2, 2) += ds * ds + da * da * corr;
   }
   const auto in = c.ekf.innovation(o.z, cam, o.cam_pos, o.R_cw, R_extra);
   if (!in) return;
@@ -106,12 +130,39 @@ void FusionTracker::processCamera(Core& c, double t, const CameraObs& o) const {
   if (use_size) {
     const double nis = in->y.dot(in->S.ldlt().solve(in->y));
     ok = nis <= p_.gate_cam_3d;
-    if (ok) c.ekf.update(*in, cam.noiseCov() + R_extra);
+    if (ok) {
+      const Mat3 R = cam.noiseCov() + R_extra;
+      c.imm.update([&](TargetEkfCA& m) {
+        const auto im = m.innovation(o.z, cam, o.cam_pos, o.R_cw, R_extra);
+        if (!im) return std::numeric_limits<double>::quiet_NaN();
+        const double ll = innovationLogLikelihood<3>(im->y, im->S);
+        m.update(*im, R);
+        return ll;
+      });
+      c.ekf = c.imm.combined();
+      c.t_last_size_cam = t;
+    }
   } else {  // bearing only: rows u, v
     const Eigen::Vector2d y = in->y.head<2>();
     const Eigen::Matrix<double, 2, 6> H = in->H.topRows<2>();
     const Eigen::Matrix2d R = (cam.noiseCov() + R_extra).topLeftCorner<2, 2>();
-    ok = c.ekf.updateGeneric<2>(y, H, R, p_.gate_cam_2d) <= p_.gate_cam_2d;
+    const Eigen::Matrix2d S = H * c.ekf.P() * H.transpose() + R;
+    ok = y.dot(S.ldlt().solve(y)) <= p_.gate_cam_2d;  // gate on the combined estimate
+    if (ok) {
+      c.imm.update([&](TargetEkfCA& m) {
+        const auto im = m.innovation(o.z, cam, o.cam_pos, o.R_cw, R_extra);
+        if (!im) return std::numeric_limits<double>::quiet_NaN();
+        const Eigen::Vector2d ym = im->y.head<2>();
+        const Eigen::Matrix<double, 2, 9> Hm = im->H.topRows<2>();
+        const double ll = innovationLogLikelihood<2>(ym, Eigen::Matrix2d(Hm * m.P() * Hm.transpose() + R));
+        if (p_.bearing_keeps_range)
+          m.updateBearingKeepRange(ym, Hm, R, (m.position() - o.cam_pos).normalized());
+        else
+          m.updateGeneric<2>(ym, Hm, R, std::numeric_limits<double>::infinity());
+        return ll;
+      });
+      c.ekf = c.imm.combined();
+    }
   }
   if (ok) {
     c.status = TrackStatus::Track;
@@ -129,7 +180,9 @@ void FusionTracker::processCamera(Core& c, double t, const CameraObs& o) const {
 
 // ---------------- radar: own-ship / target / clutter association ----------------
 void FusionTracker::processRadar(Core& c, double t, const RadarObs& o) const {
-  const Vec3& site = radar_prm_.position;
+  GroundRadarParams rp = radar_prm_;  // the radar that took this scan
+  if (o.site) rp.position = *o.site;
+  const Vec3& site = rp.position;
   const bool has_est = c.status != TrackStatus::Search;  // includes a tentative track
   Vec4 z_pred = Vec4::Zero();
   Mat46 H = Mat46::Zero();
@@ -146,7 +199,7 @@ void FusionTracker::processRadar(Core& c, double t, const RadarObs& o) const {
   std::vector<PolarToCartesian> others;
   for (size_t i = 0; i < o.plots.size(); ++i) {
     const auto& pl = o.plots[i];
-    const auto cart = radarToCartesian(pl, radar_prm_);
+    const auto cart = radarToCartesian(pl, rp);
     const Vec3 d_own = cart.p - o.own_pos;
     const double nis_own = d_own.dot((cart.P + o.own_P).ldlt().solve(d_own));
     double nis_t = std::numeric_limits<double>::infinity();
@@ -169,8 +222,21 @@ void FusionTracker::processRadar(Core& c, double t, const RadarObs& o) const {
   }
 
   if (has_est) {
-    const bool associated =
-        best >= 0 && c.ekf.updateGeneric<4>(best_y, H, R_radar_, p_.gate_radar) <= p_.gate_radar;
+    const bool associated = best >= 0;  // best_nis <= gate_radar on the combined estimate
+    if (associated) {
+      const Vec4 z = o.plots[static_cast<size_t>(best)].z();
+      c.imm.update([&](TargetEkfCA& m) {
+        const Vec4 zp = radarMeasure(m.position(), m.velocity(), site);
+        Eigen::Matrix<double, 4, 9> Hm = Eigen::Matrix<double, 4, 9>::Zero();  // acceleration: no direct effect
+        Hm.leftCols<6>() = radarJacobian(m.position(), m.velocity(), site);
+        Vec4 y = z - zp;
+        y(1) = wrapAngle(y(1));
+        const double ll = innovationLogLikelihood<4>(y, Mat4(Hm * m.P() * Hm.transpose() + R_radar_));
+        m.updateGeneric<4>(y, Hm, R_radar_, std::numeric_limits<double>::infinity());
+        return ll;
+      });
+      c.ekf = c.imm.combined();
+    }
     if (c.tentative) {  // M-of-N confirmation: a miss kills a tentative track
       if (!associated) {
         c.status = TrackStatus::Search;
@@ -190,7 +256,7 @@ void FusionTracker::processRadar(Core& c, double t, const RadarObs& o) const {
       // Learn the target size from the camera apparent size s and the DEPTH of the radar plot in
       // the camera frame (independent sensors, same instant): W = s * z / f.
       if (c.last_size && std::abs(t - c.last_size->t) < 0.1) {
-        const auto cart = radarToCartesian(o.plots[static_cast<size_t>(best)], radar_prm_);
+        const auto cart = radarToCartesian(o.plots[static_cast<size_t>(best)], rp);
         const Vec3 axis = c.last_size->R_cw.row(2).transpose();  // optical axis in the world
         const double z = axis.dot(cart.p - c.last_size->cam_pos);
         const double s = c.last_size->s, f = cam_prm_.fx;
@@ -198,7 +264,8 @@ void FusionTracker::processRadar(Core& c, double t, const RadarObs& o) const {
           const double W_m = s * z / f;
           const double var_z = axis.dot(cart.P * axis);  // radar uncertainty along the camera axis
           const double var_m = std::pow(z / f * cam_prm_.sigma_size_px, 2) + std::pow(s / f, 2) * var_z +
-                               std::pow(p_.size_rel_noise * W_m, 2);  // aspect-dependent silhouette
+                               std::pow(p_.size_rel_noise * W_m, 2) +  // aspect-dependent silhouette
+                               std::pow(z / f * p_.size_res_px, 2);    // edge erosion of small blobs
           const double K = c.W_var / (c.W_var + var_m);
           c.W += K * (W_m - c.W);
           c.W_var *= (1.0 - K);
@@ -236,8 +303,9 @@ void FusionTracker::startTrack(Core& c, double t, const Vec3& p, const Vec3& v, 
   Mat6 P = Mat6::Zero();
   P.topLeftCorner<3, 3>() = Pp;
   P.bottomRightCorner<3, 3>() = Pv + Mat3::Identity();  // + 1 (m/s)^2: acceleration in between
-  c.ekf = TargetEkf(p_.q_accel);
-  c.ekf.reset(x, P);
+  c.imm = makeImm();
+  c.imm.reset(x, P);
+  c.ekf = c.imm.combined();
   c.status = TrackStatus::Track;
   c.t_filter = t;
   c.t_last_update = t;
@@ -275,9 +343,10 @@ Mat3 FusionTracker::cameraPoseNoise(const Vec3& cam_pos, const Mat3& R_cw, const
 }
 
 TargetEkf FusionTracker::predictedAt(double t) const {
-  TargetEkf ekf = c_.ekf;
-  if (hasEstimate() && std::isfinite(c_.t_filter) && t > c_.t_filter) ekf.predict(t - c_.t_filter);
-  return ekf;
+  if (!(hasEstimate() && std::isfinite(c_.t_filter) && t > c_.t_filter)) return c_.ekf;
+  TargetImm imm = c_.imm;
+  imm.predict(t - c_.t_filter);
+  return imm.combined();
 }
 
 }  // namespace follow_me

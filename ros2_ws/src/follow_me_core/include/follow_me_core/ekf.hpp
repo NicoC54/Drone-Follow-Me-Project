@@ -54,6 +54,24 @@ class TargetEkf {
     return nis;
   }
 
+  // Update with a 2-D bearing that may NOT change the estimate along the line of sight `los`
+  // (unit vector camera -> target): the Kalman gain is projected across the line of sight, and
+  // P is updated with the Joseph form, valid for any gain (so the covariance stays honest).
+  // Why: in Cartesian coordinates, bearings from a moving camera "range" the target by parallax;
+  // with a small attitude bias that range is biased, and at 30 Hz the filter becomes confident
+  // in it (Monte-Carlo: hovering target, estimate 8 m too far at 3 sigma, follower at 0.2 m).
+  void updateBearingKeepRange(const Eigen::Vector2d& y, const Eigen::Matrix<double, 2, 6>& H,
+                              const Eigen::Matrix2d& R, const Vec3& los) {
+    const Eigen::Matrix2d S = H * P_ * H.transpose() + R;
+    Eigen::Matrix<double, 6, 2> K = P_ * H.transpose() * S.inverse();
+    const Mat3 across = Mat3::Identity() - los * los.transpose();
+    K.topRows<3>() = across * K.topRows<3>();
+    K.bottomRows<3>() = across * K.bottomRows<3>();
+    x_ += K * y;
+    const Mat6 IKH = Mat6::Identity() - K * H;
+    P_ = IKH * P_ * IKH.transpose() + K * R * K.transpose();
+  }
+
   const Vec6& x() const { return x_; }
   const Mat6& P() const { return P_; }
   Vec3 position() const { return x_.head<3>(); }

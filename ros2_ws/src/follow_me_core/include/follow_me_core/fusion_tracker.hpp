@@ -24,6 +24,9 @@
 
 #include "follow_me_core/camera_model.hpp"
 #include "follow_me_core/ekf.hpp"
+#include "follow_me_core/imm.hpp"
+
+#include <string>
 #include "follow_me_core/radar_model.hpp"
 #include "follow_me_core/track_manager.hpp"
 
@@ -31,6 +34,23 @@ namespace follow_me {
 
 struct FusionParams {
   double q_accel = 3.0;            // manoeuvring unknown drone: larger than the beacon case
+  // IMM (Monte-Carlo with random manoeuvres: with q = 3 only, the radar-only estimate during the
+  // hand-over was inconsistent in 5 m/s^2 turns, the safety margin in sigmas was wrong and the
+  // follower came within 2 m). Calm + manoeuvre models; imm = false -> single model q_accel.
+  // "imm_singer" (calm CV + Singer acceleration, default), "imm_cv" (v1: CV q_calm + CV q_cv_manoeuvre),
+  // "singer" (single Singer model), "cv" (single constant-velocity model q_accel).
+  // Closed-loop comparison (100 runs x 2 levels, 2026-11-18): imm_singer + acceleration
+  // feed-forward follows tighter (distance error 0.83 -> 0.66 m) but the follower works HARDER
+  // (tilt p95 26 -> 28-30 deg) and the filter is less consistent (NEES 8 -> 11): default imm_cv.
+  std::string model = "imm_cv";
+  double q_cv_manoeuvre = 40.0;
+  // (v1: two constant-velocity models q = 3 / 40. v2: the manoeuvre model is a Singer
+  // acceleration model, so that a stopping / starting target is predicted, not lagged.)
+  double q_calm = 3.0;                                // calm constant-velocity model [m^2/s^3]
+  double q_jerk = 30.0, singer_tau = 3.0;             // manoeuvre model: jerk density [m^2/s^5], tau [s]
+  double sojourn_calm = 10.0, sojourn_manoeuvre = 4.0;  // mean time in each model [s]
+  double mu0_manoeuvre = 0.3;                         // probability at track start
+  bool bearing_keeps_range = true;  // bearing-only camera updates do not touch the range (ekf.hpp)
   double gate_cam_3d = 16.27;      // chi2(3) 99.9 %
   double gate_cam_2d = 13.82;      // chi2(2)
   double gate_radar = 18.47;       // chi2(4) 99.9 %
@@ -54,7 +74,20 @@ struct FusionParams {
   // The silhouette of a non-spherical drone changes with its orientation: the bounding box of a
   // rotating X shape varies by ~10 %. Relative noise added to the size measurement (Gazebo phase
   // 4: without it, target NEES ~30 instead of ~6).
-  double size_rel_noise = 0.10;
+  // With the second-moment size (D36) the measured spread is 3.6 % frame to frame + 1.7 % slow
+  // (Gazebo, physical target): 5 %. (10 % was set for the bounding-box size.)
+  double size_rel_noise = 0.05;
+  // ...and this aspect error is SLOW (it follows the target's turns), not white: at 30 Hz the
+  // filter averaged it away and believed itself 0.3 m accurate with 1-2 m of bias (Gazebo
+  // phase 4: target NEES 37). A correlated error of time constant tau is worth one independent
+  // measurement every 2 tau: its variance is inflated by 2 tau / dt (dt = time since the last
+  // camera range update). 0 = white noise (previous behaviour).
+  double size_aspect_tau = 0.0;  // [s]
+  // A thresholded silhouette loses its anti-aliased edges: the apparent size is short by a few
+  // pixels (Gazebo phase 4: W = s z / f gave 0.47 m at 50 m, 0.79 m at 20 m, 0.98 m at 10 m).
+  // Learnt during the hand-over at 30-80 m, W started 18 % short -> range 1.8 m short in FOLLOW.
+  // Modelled as an absolute size uncertainty: far, poorly resolved views weigh little.
+  double size_res_px = 4.0;
   // Largest plausible target [m]: a detection implying a bigger object at the tracked depth is
   // scenery (trees, roofs on the horizon), not the drone.
   double size_max = 3.0;
@@ -77,6 +110,9 @@ class FusionTracker {
     std::vector<RadarPlot> plots;
     Vec3 own_pos = Vec3::Zero();  // follower position (navigation) at the scan time
     Mat3 own_P = Mat3::Identity();
+    // Site of the radar that took this scan (several radars: trilateration). Empty: the site of
+    // the GroundRadarParams given to the tracker. Same noise model for every radar.
+    std::optional<Vec3> site;
   };
 
   // Measurements may arrive in any order: t is the CAPTURE time.
@@ -85,6 +121,10 @@ class FusionTracker {
   void updateStatus(double now);
 
   TargetEkf predictedAt(double t) const;
+  // Probability of the manoeuvre model (0 with a single model): "is the target manoeuvring?"
+  double manoeuvreProbability() const { return c_.imm.size() > 1 ? c_.imm.mu()[1] : 0.0; }
+  // Target acceleration predicted to t (IMM mixture: ~0 while the calm model dominates).
+  Vec3 accelerationAt(double t) const;
 
   // Pixel covariance induced by the camera pose (navigation) uncertainty, at the current estimate.
   Mat3 cameraPoseNoise(const Vec3& cam_pos, const Mat3& R_cw, const Mat3& P_cam_pos,
@@ -113,6 +153,7 @@ class FusionTracker {
   double timeLastRadar() const { return c_.t_last_radar; }
 
  private:
+  TargetImm makeImm() const;
   // Everything the filter "knows": copied in each snapshot for OOSM replays.
   struct Core {
     TargetEkf ekf{1.0};
@@ -124,7 +165,9 @@ class FusionTracker {
     int cam_consec = 0;
     bool tentative = false;  // started from 2 plots, waiting for confirmation by the radar
     int hits = 0;
+    TargetImm imm;  // the filter; `ekf` below is its combined output, kept for readers
     double W = 0.5, W_var = 0.09, t_W = 0.0;
+    double t_last_size_cam = -std::numeric_limits<double>::infinity();  // last camera RANGE update
     struct LastSize {
       double t, s;
       Vec3 cam_pos;
