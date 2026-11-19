@@ -10,7 +10,8 @@ it at a safe distance. Everything between the sensors and the motors is written 
 Two Gazebo flights. Each GIF shows ONE flight: chase camera (horizon levelled), onboard camera
 with HUD, RViz, top view, and the same flight's estimation plots: range error along the line of
 sight against the filter's own 3σ on that axis, the unknown target size learnt in flight, and the
-distance to the target.
+distance to the target. Playback speed varies with the phase (x8 mid-course, x4 hand-over, x2
+around the camera lock, x4 follow) and is marked on the plots, whose time axis is flight time.
 
 ![Situation 1: small quadrotor, moderate manoeuvres, three radars](docs/media/demo1.gif)
 
@@ -21,7 +22,7 @@ stops and sprints; the follower never knows the target's shape, size or route. M
 6.3 m and 5.9 m. In FOLLOW the range error stays under the filter's 3σ 96 % of the time in
 situation 1, but only 78 % against the aggressive octocopter: the filter is somewhat
 over-confident against a target as agile as the follower (a known limit).
-**▶ [1-minute video](docs/media/demo.mp4)**.*
+**▶ [1-minute video](docs/media/demo.mp4)** (an earlier scripted flight, hexacopter).*
 
 **[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
 **[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·
@@ -55,7 +56,7 @@ over-confident against a target as agile as the follower (a known limit).
 | | |
 |---|---|
 | ![Distance to the target](docs/media/intercept_distance.png) | ![Monte-Carlo](docs/media/montecarlo.png) |
-| **Distance** (log scale): 480 m → 8 m standoff, never below the 4 m minimum. Bands = mission phases. | **300 randomised interceptions**: minimum distance, time to follow, follow quality. |
+| **Distance** (log scale): 480 m → 8-10 m standoff (agility-scaled), never below the 4 m minimum. Bands = mission phases. | **300 randomised interceptions**: minimum distance, time to follow, follow quality. |
 
 **More ground radars, better radar phase.** A radar measures range precisely (2 m) but angles
 coarsely (0.5°, 0.8°). Sites seen from different directions cross their ranges, which removes the

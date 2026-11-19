@@ -194,7 +194,7 @@ def record(out, launch_args=None, sim_end=95.0, wall_max=900.0):
 
 
 # ------------------------------------------------------------------------------- live plots
-def make_plotter(tr, t_start, t_end, width, height):
+def make_plotter(tr, t_start, t_end, width, height, speeds=None):
     """Live plots of one flight, drawn up to time t: range error along the line of sight against the
     filter's own 3-sigma on that axis (a consistent filter keeps the black curve under the orange
     one), the learnt size +- 2 sigma, and the distance to the target with the 4 m limit."""
@@ -238,24 +238,43 @@ def make_plotter(tr, t_start, t_end, width, height):
             ax.axvline(t_lock - t_start, color="#52514e", lw=0.9, ls=":")
         ax.axvline(t_follow - t_start, color="#1baf7a", lw=1.0, ls="--")
         ax.set_xlabel("time [s]", labelpad=1)
+    # playback speed of the GIF, marked on every plot: the cursor moves at a varying pace on a
+    # flight-time axis (user feedback: "the curves are not in sync with the video speed")
+    if speeds is not None:
+        import matplotlib.transforms as mtransforms
+        sp = speeds
+        bounds = [(t_start, t_hand, sp[0]), (t_hand, t_follow - 4.0, sp[1]), (t_follow - 4.0, t_follow + 6.0, sp[2]),
+                  (t_follow + 6.0, t_end, sp[3])]
+        for ax in axs:
+            tr_ = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+            for a, b, v in bounds:
+                a, b = max(a, t_start), min(b, t_end)
+                if b - a < 0.5:
+                    continue
+                # ABOVE the plot area (inside, the labels hid the curves and the legends)
+                ax.plot([a - t_start, b - t_start], [1.03, 1.03], transform=tr_, color="#8a8984", lw=2.0,
+                        solid_capstyle="butt", clip_on=False)
+                ax.plot([a - t_start] * 2, [1.01, 1.05], transform=tr_, color="#fcfcfb", lw=1.2, clip_on=False)
+                ax.text(0.5 * (a + b) - t_start, 1.05, f"x{v:g}", transform=tr_, ha="center", va="bottom",
+                        fontsize=6.5, color="#52514e", clip_on=False)
     a0, a1, a2 = axs
-    a0.set_title("range error vs the filter's 3-sigma", loc="left")
+    a0.set_title("range error vs the filter's 3-sigma", loc="left", pad=16)
     a0.set_yscale("log")
     a0.set_ylim(0.02, 30)
     a0.set_ylabel("[m]", labelpad=1)
     l_sig, = a0.plot([], [], color="#eb6834", lw=1.2, label="3-sigma (filter)")
     l_err, = a0.plot([], [], color="#0b0b0b", lw=1.2, label="true error")
     if t_start < t_lock < t_end:
-        a0.text(t_lock - t_start + 0.4, 20, "camera:\nbearing", color="#52514e", fontsize=7, va="top")
-    a0.text(t_follow - t_start + 0.4, 20, "camera:\nrange", color="#1baf7a", fontsize=7, va="top")
-    a0.legend(loc="lower right", frameon=False, fontsize=7)
-    a1.set_title("unknown size, learnt in flight", loc="left")
+        a0.text(t_lock - t_start + 0.4, 6, "camera:\nbearing", color="#52514e", fontsize=7, va="top")
+    a0.text(t_follow - t_start + 0.4, 6, "camera:\nrange", color="#1baf7a", fontsize=7, va="top")
+    a0.legend(loc="lower right", frameon=True, facecolor="#fcfcfb", edgecolor="none", framealpha=0.9, fontsize=7)
+    a1.set_title("unknown size, learnt in flight", loc="left", pad=16)
     a1.set_ylim(0.0, max(2.0, 1.4 * est[has_size, 11].max() if has_size.any() else 2.0))
     a1.set_ylabel("[m]", labelpad=1)
     band = [None]
     l_size, = a1.plot([], [], color="#2a78d6", lw=1.4, label="learnt size, +-2 sigma")
     a1.legend(loc="upper right", frameon=False, fontsize=7)
-    a2.set_title("distance to the target", loc="left")
+    a2.set_title("distance to the target", loc="left", pad=16)
     a2.set_yscale("log")
     a2.set_ylim(2, 600)
     a2.set_ylabel("[m]", labelpad=1)
@@ -427,7 +446,8 @@ def compose(src, dst, t_start=None, t_end=None, speedup=3.0, tile=(480, 270), st
     t_hand = next((tt for tt, k in ph_changes if k == 2), t_follow)
     plotter = None
     if plots_h and len(est) and est.shape[1] >= 14:  # live estimation plots under the grid (same flight)
-        plotter, close_plots, stats = make_plotter(tr, t_start, t_end, 2 * W, plots_h)
+        plotter, close_plots, stats = make_plotter(tr, t_start, t_end, 2 * W, plots_h,
+                                                   (speeds or SPEEDS) if fps else None)
         print("estimation:", {k: round(v, 3) for k, v in stats.items()})
     if fps:  # variable speed: one frame every speed / fps seconds of flight
         times, t = [], t_start
@@ -558,7 +578,7 @@ def compose_story(src, dst, title="", t_start=None, t_end=None, fps=20.0, colors
     band = [None]
     l_size, = a1.plot([], [], color="#2a78d6", lw=1.4, label="learnt size, +-2 sigma")
     a1.legend(loc="upper right", frameon=False, fontsize=7)
-    a2.set_title("distance to the target", loc="left")
+    a2.set_title("distance to the target", loc="left", pad=16)
     a2.set_yscale("log")
     a2.set_ylim(2, 600)
     a2.set_ylabel("[m]")
