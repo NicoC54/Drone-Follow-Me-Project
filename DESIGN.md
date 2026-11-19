@@ -402,9 +402,30 @@ out of 200; fully fleeing excluded: 2 m/s speed margin). One `target_seed`
 draws shape, size, flight plan and heading. Default stays `scripted` (reference flight, documented
 numbers). The offline Monte-Carlo does not draw the start heading yet.
 
+### D49. Rear rejoin: measured, left off
+Not yet behind the target, the follower aimed at a rejoin point 25 m behind it and to the side it
+was on, could circle the target inside the hand-over hold range, and entered FOLLOW from behind.
+Entry swing (scripted, median) 214 -> 137-153 deg/s, FOLLOW 5-12 s later. Four variants, each
+measured on 3 x 300 runs: going around the target takes time NEAR it, before the camera lock, and
+a manoeuvring target turns into a follower flying alongside (moderate manoeuvres: 3 -> 4-7 runs
+below 4 m; scripted: up to 3). A comfort gain bought with safety: `intercept.rejoin`, off.
+
+### D50. Agility-scaled standoff; bumpless entry only from far
+- Follow distance = 8 m + 2 m per m/s^2 of observed agility above 1.5 m/s^2, capped at 14 m.
+  Observed agility = horizontal acceleration of the estimated target velocity (2 s low-pass),
+  held as a maximum decaying over 20 s. Aggressive manoeuvres (300 runs, two seeds): below 4 m
+  43 -> 24 and 61 -> 38, in FOLLOW 29 -> 10 and 30 -> 7; scripted and moderate unchanged; estimate
+  error 0.31 -> 0.39 m (further away). A 0.5 s low-pass worked offline but not in Gazebo: the
+  camera-based velocity is noisier, a 3.6 m/s^2 target read 6.6 m/s^2, the follower backed off to
+  14 m, the estimate got noisier at that range, and the agility grew further (self-sustaining).
+- The bumpless entry (D47) caused a scripted run below 4 m (2.64 m, default seed) that seed 7 had
+  not shown: entering FOLLOW already at 8 m while the target turned towards the follower, the
+  smoothing delayed the reaction. Now only for an entry further than standoff + 4 m (the
+  turn-around case), and a slower closing speed is never smoothed.
+
 ## Next steps (ideas)
-- Hand-over geometry that brings the follower in from behind (removes the turn-around at the
-  follow entry, D47).
+- Hand-over geometry that brings the follower in from behind without flying alongside a
+  manoeuvring target (D49); evaluate the Monte-Carlo with random start headings.
 - Range-rate (Doppler) of several radars to estimate the target velocity directly (D45).
 - Standoff adapted to the target's agility, or evasive guidance (D39, D44).
 - Learnt detector (small CNN / YOLO on the cued ROI) so that phase 4 works over scenery (D35).

@@ -16,7 +16,7 @@ of view) and the top view of the whole engagement.
 ![Situation 2: octocopter twice as large, aggressive manoeuvres, three radars](docs/media/demo2.gif)
 
 *Random flight plans (`target_path:=random`, seeds 54 and 107), three ground radars: the follower
-never knows the target's shape, size or route. Minimum distance 6.9 m and 5.2 m. **▶ [1-minute video](docs/media/demo.mp4)**.*
+never knows the target's shape, size or route. Minimum distance 7.0 m and 10.1 m (the agile octocopter is followed further away). **▶ [1-minute video](docs/media/demo.mp4)**.*
 
 **[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
 **[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·
@@ -29,10 +29,10 @@ never knows the target's shape, size or route. Minimum distance 6.9 m and 5.2 m.
 - **Tracking**: **1-3 ground radars** (trilateration) + camera fusion with **exact out-of-sequence replay**, own-echo rejection,
   M-of-N track start, **IMM**, unknown target size learnt online, chi2 gating.
 - **Guidance**: mission state machine, **predicted-intercept-point** guidance, hand-over driven by
-  range uncertainty, follow guidance with bumpless entry, **CBF-like safety filter** on the
+  range uncertainty, follow guidance with bumpless entry and an **agility-scaled standoff**, **CBF-like safety filter** on the
   estimate's uncertainty.
 - **Vision**: silhouette detector in the radar-cued window, aspect-invariant apparent size.
-- **Validation**: 51 tests, offline simulator (a run in ~0.1 s), **Monte-Carlo campaigns**,
+- **Validation**: 52 tests, offline simulator (a run in ~0.1 s), **Monte-Carlo campaigns**,
   random target flights in Gazebo too (one seed replays a run), ground-truth diagnosis tools.
 
 ## Key results
@@ -40,7 +40,7 @@ never knows the target's shape, size or route. Minimum distance 6.9 m and 5.2 m.
 | | |
 |---|---|
 | 300 randomised interceptions (offline) | **300/300** reach follow, **0** below 4 m |
-| Random target manoeuvres, moderate / aggressive | 4 / 49 runs out of 300 below 4 m |
+| Random target manoeuvres, moderate / aggressive | 5 / **24** runs out of 300 below 4 m (aggressive: 49 before the agility-scaled standoff) |
 | Gazebo, physical target (rendered images) | estimate error **0.49 m**, min distance 5.0 m |
 | Gazebo phase-4 gap, after ground-truth diagnosis | error 1.36 → 0.26 m, NEES 37 → 7.5 |
 | 1 → 3 ground radars (trilateration), radar-phase error | horizontal 2.4 → **0.9 m**, vertical 3.2 → **1.5 m** |
