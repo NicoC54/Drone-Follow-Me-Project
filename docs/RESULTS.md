@@ -40,6 +40,15 @@ below 4 m) but not against one as agile as the follower itself (49/300): a docum
 Two ground radars halve the horizontal error but barely help the altitude: both see the target at
 a low elevation (vertical dilution of precision). A third site close to the engagement area does.
 Gazebo, `radars:=3`: mid-course estimate error 1-3 m instead of 4-6 m, FOLLOW at 37 s instead of 43 s.
+Once the camera is locked it dominates: follow-phase distance error 0.83 / 0.76 / 0.72 m with
+1 / 2 / 3 radars, a marginal gain.
+
+Error of one scan along the target's path (analytic, the filter then averages several scans):
+
+![Radar gain along the path](media/radar_gain.png)
+
+The same quantity over the whole area. Read it at the red path: the paler the colour, the
+smaller the error. Each added site makes the area around the path paler.
 
 ![Radar geometry](media/radar_geometry.png)
 

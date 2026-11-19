@@ -7,12 +7,16 @@ A ground radar picks up an **unknown drone** 480 m away. A quadrotor flies to th
 intercept point, hands over to its own camera, **learns the target's size in flight**, then follows
 it at a safe distance. Everything between the sensors and the motors is written here, in C++.
 
-![Radar-cued interception then camera follow](docs/media/intercept.gif)
+![Gazebo: radar track only, then camera hand-over, then follow](docs/media/demo.gif)
 
-| Gazebo: chase camera + onboard camera with HUD | RViz: what the algorithms see |
+*Gazebo, 15 s: chase camera (left), onboard camera with HUD (right). Mid-course on the radar
+track, hand-over to the camera while learning the target's size, then follow at 8 m.
+**▶ [Full 1-minute video](docs/media/demo.mp4)**.*
+
+| Top view of the whole engagement | RViz: what the algorithms see |
 |---|---|
-| [![1-minute demo in Gazebo](docs/media/demo_poster.png)](docs/media/demo.mp4) | ![RViz during the hand-over](docs/media/rviz.gif) |
-| **▶ [1-minute demo video](docs/media/demo.mp4)**: unknown hexacopter, radar cueing, camera lock, follow. | Follower (blue) and target truth (red) with their tracks; target **estimate** and its 3σ ellipsoid (orange: radar only, green: radar + camera); aim point and approach line (mid-course: predicted intercept point; hand-over: standoff point 8 m behind the target); camera field of view; true distance on the link (green → red near 4 m); mission phase. |
+| ![Radar-cued interception then camera follow](docs/media/intercept.gif) | ![RViz during the hand-over](docs/media/rviz.gif) |
+| Follower (blue) flies to the predicted intercept point, then settles 8 m behind the target (red). | Target **estimate** and its 3σ ellipsoid (orange: radar only, green: radar + camera), aim point, camera field of view, true distance (green → red near 4 m). |
 
 **[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
 **[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·
@@ -25,10 +29,11 @@ it at a safe distance. Everything between the sensors and the motors is written 
 - **Tracking**: **1-3 ground radars** (trilateration) + camera fusion with **exact out-of-sequence replay**, own-echo rejection,
   M-of-N track start, **IMM**, unknown target size learnt online, chi2 gating.
 - **Guidance**: mission state machine, **predicted-intercept-point** guidance, hand-over driven by
-  range uncertainty, follow guidance, **CBF-like safety filter** on the estimate's uncertainty.
+  range uncertainty, follow guidance with bumpless entry, **CBF-like safety filter** on the
+  estimate's uncertainty.
 - **Vision**: silhouette detector in the radar-cued window, aspect-invariant apparent size.
-- **Validation**: 48 tests, offline simulator (a run in ~0.1 s), **Monte-Carlo campaigns**,
-  ground-truth diagnosis tools for Gazebo.
+- **Validation**: 51 tests, offline simulator (a run in ~0.1 s), **Monte-Carlo campaigns**,
+  random target flights in Gazebo too (one seed replays a run), ground-truth diagnosis tools.
 
 ## Key results
 
@@ -44,21 +49,16 @@ it at a safe distance. Everything between the sensors and the motors is written 
 
 | | |
 |---|---|
-| ![Distance to the target](docs/media/intercept_distance.png) | ![Estimation error and learnt size](docs/media/intercept_estimation.png) |
-| **Distance** (log scale): 480 m → 8 m standoff, never below the 4 m minimum. Bands = mission phases. | **Estimation**: radar alone (metres), then radar + camera (decimetres) inside the filter's 3σ; the unknown target size is learnt in flight. |
-| ![Monte-Carlo](docs/media/montecarlo.png) | ![Random manoeuvres](docs/media/montecarlo_maneuvers.png) |
-| **300 randomised interceptions**: minimum distance, time to follow, follow quality. | **Random target manoeuvres**: safety and filter consistency (NEES, ideal 6) by target agility. |
+| ![Distance to the target](docs/media/intercept_distance.png) | ![Monte-Carlo](docs/media/montecarlo.png) |
+| **Distance** (log scale): 480 m → 8 m standoff, never below the 4 m minimum. Bands = mission phases. | **300 randomised interceptions**: minimum distance, time to follow, follow quality. |
 
-One to three ground radars: ranges are precise, angles coarse; crossing sites trilaterate, and a
-site close to the area also fixes the altitude (1σ error of one scan, analytic):
+**More ground radars, better radar phase.** A radar measures range precisely (2 m) but angles
+coarsely (0.5°, 0.8°). Sites seen from different directions cross their ranges, which removes the
+angle error. The gain matters until the camera takes over, not after:
 
-![Radar geometry](docs/media/radar_geometry.png)
+![Error along the target's path with 1, 2, 3 radars](docs/media/radar_gain.png)
 
-Top view of the same flight, with every radar plot (target, own echo, clutter):
-
-![Top view](docs/media/intercept_overview.png)
-
-Details and all figures: [docs/RESULTS.md](docs/RESULTS.md).
+Estimation details, random manoeuvres, radar maps, every radar plot: [docs/RESULTS.md](docs/RESULTS.md).
 
 ## Architecture
 
@@ -89,8 +89,9 @@ offline simulator, the unit tests and the ROS 2 nodes alike.
 cd ros2_ws && source /opt/ros/jazzy/setup.bash
 colcon build && colcon test && colcon test-result
 source install/setup.bash
-ros2 launch follow_me_gazebo intercept.launch.py                     # Gazebo + RViz, random target
+ros2 launch follow_me_gazebo intercept.launch.py                     # Gazebo + RViz, random target model
 ros2 launch follow_me_gazebo intercept.launch.py radars:=3           # three ground radars
+ros2 launch follow_me_gazebo intercept.launch.py target_path:=random # random target flight
 ./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 300 --out ../out   # no ROS
 ```
 

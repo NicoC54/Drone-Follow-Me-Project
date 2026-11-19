@@ -8,7 +8,8 @@
     python3 tools/make_figures.py out/ docs/media/
 
 Outputs: intercept_overview.png, intercept_distance.png, intercept_estimation.png,
-montecarlo.png + montecarlo_summary.json (if out/montecarlo.csv exists), intercept.gif, and
+montecarlo.png + montecarlo_summary.json (if out/montecarlo.csv exists), radar_geometry.png,
+radar_gain.png, intercept.gif, and
 replay.json (written to ../replay/ next to the destination when it exists: docs/replay/).
 """
 import json
@@ -280,6 +281,41 @@ def fig_radar_geometry(s, dst, altitude=40.0):
     plt.close(fig)
 
 
+def fig_radar_gain(s, dst):
+    """The same numbers as the maps, read only where it matters: along the target's path, in time.
+
+    1σ position error of ONE scan of 1, 2, 3 radars at the true target position (analytic, as the
+    maps). Stops at FOLLOW: from then on the camera dominates and the radar count barely matters.
+    """
+    t_end = s["t"][np.argmax(s["phase"] == 3)] if np.any(s["phase"] == 3) else s["t"][-1]
+    k = (s["t"] <= t_end + 5) & (s["phase"] >= 1)
+    t, P = s["t"][k], np.c_[s["lx"][k], s["ly"][k], s["lz"][k]]
+    blues = ["#9ec5f4", "#4f93e6", "#1c4f94"]  # one hue, light -> dark = more radars
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), sharey=True)
+    for k_r in range(3):
+        H, V = [], []
+        for p in P:
+            C = np.linalg.inv(sum(radar_plot_info(p, np.array(site)) for site in RADAR_SITES[:k_r + 1]))
+            H.append(np.sqrt(C[0, 0] + C[1, 1]))
+            V.append(np.sqrt(C[2, 2]))
+        for ax, field in zip(axes, (H, V)):
+            ax.plot(t, field, color=blues[k_r], lw=2.0)
+            ax.text(t[-1] + 0.8, field[-1], f"{k_r + 1} radar{'s' if k_r else ''}", color=INK2,
+                    fontsize=9, va="center")
+    for ax, name in zip(axes, ("Horizontal", "Vertical")):
+        shade_phases(ax, {"t": t, "phase": s["phase"][k]})
+        ax.set_title(f"{name} error, 1σ of one scan", loc="left", pad=16)
+        ax.set_xlabel("time [s]")
+        ax.set_xlim(t[0], t[-1] + 9)
+        ax.set_ylim(0, None)
+    axes[0].set_ylabel("error [m]")
+    fig.suptitle("Along the target's path, before the camera takes over: every added radar cuts the error.",
+                 x=0.01, ha="left", fontsize=10, color=INK2)
+    fig.tight_layout()
+    fig.savefig(dst / "radar_gain.png", dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+
 def cov_ellipse_xy(row):
     P = np.array([[row["pxx"], row["pxy"]], [row["pxy"], row["pyy"]]])
     w, v = np.linalg.eigh(P)
@@ -387,6 +423,7 @@ def main():
         (dst / "montecarlo_summary.json").write_text(json.dumps(mc, indent=2))
         print("Monte-Carlo:", mc)
     fig_radar_geometry(s, dst)
+    fig_radar_gain(s, dst)
     make_gif(s, r, dst)
     export_replay(s, r, dst, true_size)
     print("written to", dst)
