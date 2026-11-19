@@ -18,6 +18,12 @@
   ros_type_name: geometry_msgs/msg/Twist
   gz_type_name: gz.msgs.Twist
   direction: ROS_TO_GZ
+# Phase 4 target with dynamics: leader_node is its pilot (same setpoint convention).
+- ros_topic_name: /leader/fc/accel_yaw_setpoint
+  gz_topic_name: /model/leader/fc/setpoint
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: gz.msgs.Twist
+  direction: ROS_TO_GZ
 - ros_topic_name: /follower/gimbal/yaw_cmd
   gz_topic_name: /model/follower/gimbal/yaw_cmd
   ros_type_name: std_msgs/msg/Float64
@@ -79,4 +85,10 @@
   gz_topic_name: /model/leader/pose
   ros_type_name: tf2_msgs/msg/TFMessage
   gz_type_name: gz.msgs.Pose_V
+  direction: GZ_TO_ROS
+# Demo video only (intercept.launch.py chase_cam:=true).
+- ros_topic_name: /follower/chase_camera/image
+  gz_topic_name: /follower/chase_camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
   direction: GZ_TO_ROS

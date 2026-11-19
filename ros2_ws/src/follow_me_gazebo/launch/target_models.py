@@ -1,0 +1,124 @@
+"""SDF of the phase-4 target drone ("leader"), generated at launch time.
+
+The tracker does not know the target: neither its shape nor its size (learnt in flight). To show
+it in Gazebo, the launch file spawns one of several multirotors, at a random or chosen scale:
+
+    kind   quad_x | hexa | octo        (X configurations: N arms, N spinning rotors)
+    scale  0.6 .. 1.8                  (1.0: the original 1.1 m grey quadrotor)
+
+physics=True (default): a real quadrotor (gravity, 1.5 kg, inertia of QuadrotorParams) flown by
+the SAME flight-controller plugin as the follower; leader_node is its pilot and sends acceleration
++ yaw setpoints on /model/leader/fc/setpoint. It tilts to accelerate and to turn.
+physics=False: kinematic (VelocityControl on /model/leader/cmd_vel, no gravity, never tilts).
+Both publish /model/leader/odometry and /model/leader/pose (TF). The thrust model is the
+quadrotor's whatever the drawn shape (hexa / octo: visual shape and size only).
+"""
+import math
+import random
+
+# arm length (centre -> rotor) [m], rotor radius [m], body half-size [m], at scale 1
+KINDS = {
+    "quad_x": dict(n=4, arm=0.594, rotor=0.14, body=0.15),
+    "hexa": dict(n=6, arm=0.62, rotor=0.12, body=0.16),
+    "octo": dict(n=8, arm=0.68, rotor=0.10, body=0.17),
+}
+
+
+def _mat(r, g, b, a=1.0):
+    c = f"{r:.2f} {g:.2f} {b:.2f} {a:.2f}"
+    return f"<material><ambient>{c}</ambient><diffuse>{c}</diffuse></material>"
+
+
+def span(kind, scale):
+    """Tip-to-tip size seen from the side, roughly what the detector measures [m]."""
+    k = KINDS[kind]
+    return 2.0 * (k["arm"] + k["rotor"]) * scale
+
+
+def choose(kind="random", scale="random", seed=None):
+    rng = random.Random(seed)
+    if kind in ("", "random"):
+        kind = rng.choice(sorted(KINDS))
+    if kind not in KINDS:
+        raise ValueError(f"unknown target kind '{kind}', expected one of {sorted(KINDS)} or random")
+    scale = rng.uniform(0.6, 1.8) if scale in ("", "random") else float(scale)
+    return kind, scale
+
+
+def _drive(physics):
+    if physics:  # same flight controller as the follower (Gazebo system plugin, 500 Hz)
+        return """<plugin filename="follow_me_flight_controller" name="follow_me_gazebo::FlightController">
+      <link_name>base_link</link_name>
+      <setpoint_topic>/model/leader/fc/setpoint</setpoint_topic>
+      <nav_topic>/model/leader/nav/odometry</nav_topic>
+      <status_topic>/model/leader/fc/status</status_topic>
+      <setpoint_timeout>0.5</setpoint_timeout>
+      <seed>7</seed>
+    </plugin>"""
+    # Twist in BODY frame: linear.x = forward speed, linear.z = climb, angular.z = turn rate
+    return """<plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+      <topic>/model/leader/cmd_vel</topic>
+    </plugin>"""
+
+
+def target_sdf(kind, scale, physics=True):
+    k = KINDS[kind]
+    n, arm, rr, body = k["n"], k["arm"] * scale, k["rotor"] * scale, k["body"] * scale
+    grey = (0.18, 0.18, 0.20)
+    links, joints, plugins, arms = [], [], [], []
+    for i in range(n):
+        a = math.pi / n + 2.0 * math.pi * i / n  # X configuration: no arm straight ahead
+        cx, cy = arm * math.cos(a), arm * math.sin(a)
+        arms.append(
+            f'<visual name="arm_{i}"><pose>{cx / 2:.4f} {cy / 2:.4f} 0 0 0 {a:.4f}</pose>'
+            f'<geometry><box><size>{arm:.4f} {0.03 * scale:.4f} {0.03 * scale:.4f}</size></box></geometry>'
+            f'{_mat(0.1, 0.1, 0.1)}</visual>')
+        links.append(f"""
+    <link name="rotor_{i}">
+      <pose>{cx:.4f} {cy:.4f} {0.03 * scale:.4f} 0 0 0</pose>
+      <gravity>false</gravity>
+      <inertial><mass>0.001</mass>
+        <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+      <visual name="disc"><geometry><cylinder><radius>{rr:.4f}</radius><length>{0.006 * scale:.4f}</length></cylinder></geometry>
+        {_mat(0.25, 0.25, 0.25, 0.35)}</visual>
+      <visual name="blade"><pose>0 0 {0.006 * scale:.4f} 0 0 0</pose><geometry><box><size>{1.9 * rr:.4f} {0.026 * scale:.4f} {0.004 * scale:.4f}</size></box></geometry>
+        {_mat(0.05, 0.05, 0.05)}</visual>
+      <visual name="hub"><geometry><cylinder><radius>{0.02 * scale:.4f}</radius><length>{0.03 * scale:.4f}</length></cylinder></geometry>
+        {_mat(0.6, 0.6, 0.62)}</visual>
+    </link>""")
+        joints.append(f"""
+    <joint name="rotor_{i}_joint" type="revolute">
+      <parent>base_link</parent><child>rotor_{i}</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>""")
+        plugins.append(f"""
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>rotor_{i}_joint</joint_name>
+      <initial_velocity>{40.0 if i % 2 == 0 else -40.0}</initial_velocity>
+    </plugin>""")
+    return f"""<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="leader">
+    <!-- generated by follow_me_gazebo/launch/target_models.py: {kind}, scale {scale:.2f}, span {span(kind, scale):.2f} m -->
+    <link name="base_link">
+      <gravity>{str(physics).lower()}</gravity>
+      <inertial>
+        <mass>{1.5 - 0.001 * n if physics else 1.0}</mass>
+        <inertia><ixx>0.029</ixx><iyy>0.029</iyy><izz>0.055</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <visual name="body"><geometry><cylinder><radius>{body:.4f}</radius><length>{0.12 * scale:.4f}</length></cylinder></geometry>
+        {_mat(*grey)}</visual>
+      {''.join(arms)}
+    </link>{''.join(links)}{''.join(joints)}
+    {_drive(physics)}
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>world</odom_frame>
+      <robot_base_frame>leader</robot_base_frame>
+      <odom_topic>/model/leader/odometry</odom_topic>
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
+    <!-- (OdometryPublisher also publishes /model/leader/pose, bridged to /tf) -->{''.join(plugins)}
+  </model>
+</sdf>
+"""

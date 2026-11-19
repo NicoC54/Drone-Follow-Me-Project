@@ -70,6 +70,8 @@ def rotor_block(model, xs, z, gravity):
 
 
 def upgrade_rotors(text, model, gravity):
+    if f'<model name="{model}">' not in text:
+        return text  # spawned at launch time (intercept.sdf: launch/target_models.py)
     start = text.index(f'<model name="{model}">')
     end = text.index("</model>", start)
     body = text[start:end]
