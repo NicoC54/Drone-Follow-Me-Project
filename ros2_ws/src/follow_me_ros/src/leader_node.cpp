@@ -1,4 +1,6 @@
-// leader_node: flies the leader along the scripted scenario (same as the offline sim).
+// leader_node: flies the leader along the scripted scenario (same as the offline sim), or along a
+// random one (maneuvers = 1 moderate / 2 aggressive, maneuver_seed: same generator as the offline
+// Monte-Carlo), from start_heading_deg if given (the Gazebo model must be spawned with that yaw).
 //  physics = false: BODY-frame twist to Gazebo's VelocityControl (kinematic model).
 //  physics = true : the leader is a quadrotor with the follower's flight-controller plugin; this
 //    node is its PILOT: the scenario is a reference trajectory, tracked with
@@ -23,11 +25,28 @@ class LeaderNode : public rclcpp::Node {
     return name == "intercept" ? follow_me::InterceptConfig().base.leader : follow_me::LeaderParams{};
   }
 
+  follow_me::LeaderParams flightPlan(double duration) {
+    follow_me::LeaderParams p = scenario(declare_parameter("scenario", std::string("follow")));
+    const int level = static_cast<int>(declare_parameter("maneuvers", 0));
+    const int seed = static_cast<int>(declare_parameter("maneuver_seed", 1));
+    const double heading = declare_parameter("start_heading_deg", -1.0);
+    if (level > 0) {
+      const auto mp = follow_me::ManeuverParams::level(level);
+      p.scenario = follow_me::randomScenario(static_cast<std::uint64_t>(seed), duration, mp);
+      p.max_accel = mp.max_accel;
+    }
+    if (heading >= 0.0) p.start_heading_deg = heading;
+    RCLCPP_INFO(get_logger(), "Flight plan: %s (seed %d), start heading %.0f deg, %zu segments",
+                level > 0 ? (level >= 2 ? "random, aggressive" : "random, moderate") : "scripted", seed,
+                p.start_heading_deg, p.scenario.size());
+    return p;
+  }
+
   LeaderNode()
       : Node("leader_node"),
         start_delay_(declare_parameter("start_delay", 5.0)),  // time for the follower to lock on
         duration_(declare_parameter("duration", 90.0)),       // then brake to a hover
-        leader_(withFinalStop(scenario(declare_parameter("scenario", std::string("follow"))), duration_)) {
+        leader_(withFinalStop(flightPlan(duration_), duration_)) {
     const double rate = declare_parameter("rate_hz", 50.0);
     physics_ = declare_parameter("physics", false);
     pub_ = create_publisher<geometry_msgs::msg::Twist>(physics_ ? "/leader/fc/accel_yaw_setpoint" : "/leader/cmd_vel", 10);

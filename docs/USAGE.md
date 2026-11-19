@@ -29,6 +29,8 @@ ros2 launch follow_me_gazebo follow_me.launch.py p_miss:=0.1 p_outlier:=0.02
 # phase 4: radar-cued interception of an unknown drone
 ros2 launch follow_me_gazebo intercept.launch.py                 # Gazebo + RViz (+ foxglove:=true)
 ros2 launch follow_me_gazebo intercept.launch.py target:=octo target_scale:=0.7   # chosen target
+ros2 launch follow_me_gazebo intercept.launch.py target_path:=random               # random flight plan + heading
+ros2 launch follow_me_gazebo intercept.launch.py target_path:=random target_maneuvers:=2 target_seed:=7  # aggressive, replayable
 ./build/follow_me_core/follow_me_offline_sim --intercept --seed 2 --out ../out
 ./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 300 --seed 7 --out ../out
 ./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 300 --maneuvers 2 --out ../out/maneuvers/L2

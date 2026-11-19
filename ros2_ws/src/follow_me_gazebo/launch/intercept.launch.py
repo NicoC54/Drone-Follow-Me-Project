@@ -4,6 +4,8 @@
     ros2 launch follow_me_gazebo intercept.launch.py gui:=false rviz:=false
     ros2 launch follow_me_gazebo intercept.launch.py target:=hexa target_scale:=1.5
     ros2 launch follow_me_gazebo intercept.launch.py target_seed:=4    # reproducible random target
+    ros2 launch follow_me_gazebo intercept.launch.py target_path:=random              # random flight
+    ros2 launch follow_me_gazebo intercept.launch.py target_path:=random target_maneuvers:=2 target_seed:=7
     ros2 launch follow_me_gazebo intercept.launch.py radars:=3         # three ground radars
 
 Chain: radar_node (ground radar) -> fusion_node (radar + camera, out-of-sequence replay)
@@ -11,7 +13,9 @@ Chain: radar_node (ground radar) -> fusion_node (radar + camera, out-of-sequence
        detector_node runs in "silhouette" mode inside the window cued by fusion_node.
 (The phase-3 follow scenario with the red beacon stays available: follow_me.launch.py.)
 """
+import math
 import os
+import random
 import sys
 import tempfile
 import time
@@ -81,21 +85,40 @@ def spawn_radars(context, common):
     return actions
 
 
-def spawn_target(context):
-    """Spawns the unknown target drone: random (or chosen) shape and size."""
-    seed = LaunchConfiguration("target_seed").perform(context)
+# Start of the target (= follow_me_core InterceptConfig): ~420 m from the follower.
+TARGET_START = (330.0, 260.0, 40.0)
+TARGET_HEADING_DEG = 200.0          # scripted flight plan: nearly head-on
+HEADING_TO_FOLLOWER_DEG = 218.0     # bearing from the target start to the follower start
+HEADING_SPREAD_DEG = 100.0          # random flight: head-on, crossing or partly fleeing (not
+                                    # fully fleeing: 2 m/s of speed margin, > 120 s to catch up)
+
+
+def spawn_target(context, common):
+    """Spawns the unknown target drone (random or chosen shape and size) and its pilot
+    (scripted or random flight plan). ONE seed draws everything: a run can be replayed."""
+    seed_arg = LaunchConfiguration("target_seed").perform(context)
+    seed = int(seed_arg) if seed_arg not in ("", "random") else time.time_ns() % 1_000_000
     kind, scale = target_models.choose(LaunchConfiguration("target").perform(context),
-                                       LaunchConfiguration("target_scale").perform(context),
-                                       int(seed) if seed not in ("", "random") else time.time_ns())
+                                       LaunchConfiguration("target_scale").perform(context), seed)
     physics = LaunchConfiguration("target_physics").perform(context).lower() in ("true", "1")
+    path = LaunchConfiguration("target_path").perform(context)
+    level = int(LaunchConfiguration("target_maneuvers").perform(context)) if path == "random" else 0
+    heading = TARGET_HEADING_DEG
+    if level > 0:
+        heading = (HEADING_TO_FOLLOWER_DEG + random.Random(seed).uniform(-1, 1) * HEADING_SPREAD_DEG) % 360.0
     sdf = target_models.target_sdf(kind, scale, physics)
+    x, y, z = TARGET_START
     return [
-        LogInfo(msg=f"[target] {kind}, scale {scale:.2f}, span ~{target_models.span(kind, scale):.2f} m, "
-                    f"{'quadrotor dynamics' if physics else 'kinematic'} "
+        LogInfo(msg=f"[target] seed {seed}: {kind}, scale {scale:.2f}, span ~{target_models.span(kind, scale):.2f} m, "
+                    f"{'quadrotor dynamics' if physics else 'kinematic'}, "
+                    f"{'random flight (level %d)' % level if level else 'scripted flight'}, heading {heading:.0f} deg "
                     f"(unknown to the tracker: watch the learnt size W)"),
         Node(package="ros_gz_sim", executable="create", output="log",
              arguments=["-world", "follow_me", "-name", "leader", "-string", sdf,
-                        "-x", "330", "-y", "260", "-z", "40", "-Y", "3.4907"]),
+                        "-x", str(x), "-y", str(y), "-z", str(z), "-Y", f"{math.radians(heading):.4f}"]),
+        Node(package="follow_me_ros", executable="leader_node", name="leader_node", output="screen",
+             parameters=common + [{"duration": 120.0, "physics": physics, "maneuvers": level,
+                                   "maneuver_seed": seed, "start_heading_deg": heading}]),
     ]
 
 
@@ -155,7 +178,12 @@ def generate_launch_description():
         DeclareLaunchArgument("rviz", default_value="true", description="Start RViz2"),
         DeclareLaunchArgument("target", default_value="random", description="Target drone: quad_x, hexa, octo or random"),
         DeclareLaunchArgument("target_scale", default_value="random", description="Target scale (1.0 = 1.1 m quad) or random (0.6-1.8)"),
-        DeclareLaunchArgument("target_seed", default_value="random", description="Seed of the random target (reproducible runs)"),
+        DeclareLaunchArgument("target_seed", default_value="random",
+                              description="Seed of the random target: shape, size, flight plan, heading (reproducible runs)"),
+        DeclareLaunchArgument("target_path", default_value="scripted",
+                              description="Target flight: scripted (reference flight) or random"),
+        DeclareLaunchArgument("target_maneuvers", default_value="1",
+                              description="Random flight: 1 moderate, 2 aggressive (offline Monte-Carlo levels)"),
         DeclareLaunchArgument("radars", default_value="1",
                               description="Number of ground radars (1-3): trilateration with 2-3 sites"),
         DeclareLaunchArgument("chase_cam", default_value="false",
@@ -168,9 +196,8 @@ def generate_launch_description():
         DeclareLaunchArgument("p_outlier", default_value="0.0", description="Injected false detection probability"),
         DeclareLaunchArgument("latency_ms", default_value="0", description="Injected detector processing delay [ms]"),
         OpaqueFunction(function=start_gazebo),
-        OpaqueFunction(function=spawn_target),
+        OpaqueFunction(function=spawn_target, args=[common]),
         bridge,
-        node("leader_node", {"duration": 120.0, "physics": LaunchConfiguration("target_physics")}),
         OpaqueFunction(function=spawn_radars, args=[common]),
         node("detector_node", inject),
         node("fusion_node"),
