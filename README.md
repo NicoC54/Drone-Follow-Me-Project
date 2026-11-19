@@ -1,120 +1,97 @@
-# drone-follow-me
+# Drone Follow-Me: radar-cued interception of an unknown drone
 
-Teaching GNC project: a follower drone intercepts an unknown drone picked up by a ground radar,
-hands over to its own camera, learns the target's size, then follows it at a safe distance.
-C++17 / ROS 2 Jazzy / Gazebo Harmonic, with a 6-DOF quadrotor flown by its own flight controller.
+[![CI](https://github.com/NicoC54/Drone-Follow-Me-Project/actions/workflows/ci.yml/badge.svg)](https://github.com/NicoC54/Drone-Follow-Me-Project/actions/workflows/ci.yml)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C) ![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-22314E) ![Gazebo Harmonic](https://img.shields.io/badge/Gazebo-Harmonic-F58113)
+
+A ground radar picks up an **unknown drone** 480 m away. A quadrotor flies to the predicted
+intercept point, hands over to its own camera, **learns the target's size in flight**, then follows
+it at a safe distance. Everything between the sensors and the motors is written here, in C++.
 
 ![Radar-cued interception then camera follow](docs/media/intercept.gif)
 
-**[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** (three.js, runs in the browser)
+| Gazebo: chase camera + onboard camera with HUD | RViz: what the algorithms see |
+|---|---|
+| [![1-minute demo in Gazebo](docs/media/demo_poster.png)](docs/media/demo.mp4) | ![RViz during the hand-over](docs/media/rviz.gif) |
+| **▶ [1-minute demo video](docs/media/demo.mp4)**: unknown hexacopter, radar cueing, camera lock, follow. | Follower (blue) and target truth (red) with their tracks; target **estimate** and its 3σ ellipsoid (orange: radar only, green: radar + camera); aim point and approach line (mid-course: predicted intercept point; hand-over: standoff point 8 m behind the target); camera field of view; true distance on the link (green → red near 4 m); mission phase. |
+
+**[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
+**[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·
+**[Course (FR)](docs/cours/00_INDEX.md)**
+
+## What is built from scratch
+
+- **Flight**: 6-DOF quadrotor, flight controller (thrust vector, quaternion attitude, PI rates,
+  mixer with desaturation) as a Gazebo plugin at 500 Hz, **15-state ESKF** on IMU/GNSS/baro/mag.
+- **Tracking**: **1-3 ground radars** (trilateration) + camera fusion with **exact out-of-sequence replay**, own-echo rejection,
+  M-of-N track start, **IMM**, unknown target size learnt online, chi2 gating.
+- **Guidance**: mission state machine, **predicted-intercept-point** guidance, hand-over driven by
+  range uncertainty, follow guidance, **CBF-like safety filter** on the estimate's uncertainty.
+- **Vision**: silhouette detector in the radar-cued window, aspect-invariant apparent size.
+- **Validation**: 48 tests, offline simulator (a run in ~0.1 s), **Monte-Carlo campaigns**,
+  ground-truth diagnosis tools for Gazebo.
+
+## Key results
 
 | | |
 |---|---|
-| ![top view](docs/media/intercept_overview.png) | ![distance](docs/media/intercept_distance.png) |
+| 300 randomised interceptions (offline) | **300/300** reach follow, **0** below 4 m |
+| Random target manoeuvres, moderate / aggressive | 4 / 49 runs out of 300 below 4 m |
+| Gazebo, physical target (rendered images) | estimate error **0.49 m**, min distance 5.0 m |
+| Gazebo phase-4 gap, after ground-truth diagnosis | error 1.36 → 0.26 m, NEES 37 → 7.5 |
+| 1 → 3 ground radars (trilateration), radar-phase error | horizontal 2.4 → **0.9 m**, vertical 3.2 → **1.5 m** |
 
-![estimation](docs/media/intercept_estimation.png)
+## Gallery
 
-**300 randomised runs** (wind 0-6 m/s, radar latency 0.1-0.6 s, clutter 0-4 plots/scan, target
-size 0.4-1.2 m): 300/300 reach FOLLOW, 0 below the 4 m minimum distance (worst 5.3 m),
-FOLLOW after 39 ± 13 s, median follow distance error 0.78 m RMS.
-
-![Monte-Carlo](docs/media/montecarlo.png)
-
-The project grew in four phases (each one documented in [docs/cours/](docs/cours/00_INDEX.md), French):
-1. Python sandbox: camera on a red beacon, EKF, guidance, control, safety filter.
-2. C++ / ROS 2 / Gazebo: the same algorithms on real rendered images.
-3. Real quadrotor: own flight controller (Gazebo plugin) + 15-state ESKF navigation.
-4. Ground radar + predicted-intercept-point guidance + camera hand-over on an unknown drone.
-
-The original phase-1 chain, kept deliberately small:
-
-```
-truth (leader + follower)                                    vehicles.py
-   -> camera: pixel position + apparent size, noise,         camera.py
-      missed and false detections
-   -> EKF on the leader [p, v] + gating + track management   estimation.py
-   -> guidance: follow point 8 m behind / 2 m above          guidance.py
-   -> control: cascaded P/PI + separation safety filter      control.py
-   -> follower point-mass dynamics (lag, drag, wind, gusts)  vehicles.py
-```
-
-Two implementations:
-- **Python** (`follow_me/`): compact reference and sandbox, matplotlib plots.
-- **C++ / ROS 2 Jazzy / Gazebo Harmonic** (`ros2_ws/`): the same algorithms in a C++ library,
-  wrapped in ROS 2 nodes, with real camera images rendered by Gazebo. The follower is a 6-DOF
-  quadrotor flown by its own flight controller (Gazebo plugin: 15-state ESKF navigation on
-  IMU/GNSS/baro/mag + attitude/rate control + mixer).
-  See [docs/UNDERSTANDING_ROS.md](docs/UNDERSTANDING_ROS.md) and
-  [docs/UNDERSTANDING_FLIGHT.md](docs/UNDERSTANDING_FLIGHT.md).
-
-Learning sheets (French): [docs/UNDERSTANDING.md](docs/UNDERSTANDING.md) (Python, GNC principles),
-[docs/UNDERSTANDING_ROS.md](docs/UNDERSTANDING_ROS.md) (C++ / ROS 2 / Gazebo),
-[docs/UNDERSTANDING_FLIGHT.md](docs/UNDERSTANDING_FLIGHT.md) (quadrotor, flight controller, navigation).
-
-The Python loop is in `follow_me/sim.py` and every parameter is in `follow_me/config.py`.
-Design choices and their reasons are in [DESIGN.md](DESIGN.md).
-
-## Run
-
-Requirements: Python 3.10+, numpy, matplotlib (pytest for the tests).
-
-```bash
-python -m follow_me                       # metrics + 3 figures
-python -m follow_me --animate             # + top-view animation
-python -m follow_me --occlusion 40 46     # blind the camera: COAST -> SEARCH -> reacquire
-python -m follow_me --seed 3 --no-plots --save out/   # headless, figures to out/
-python -m pytest tests
-```
-
-## Run the C++ / ROS 2 / Gazebo version
-
-```bash
-cd ros2_ws
-source /opt/ros/jazzy/setup.bash
-colcon build && colcon test && colcon test-result --verbose
-source install/setup.bash
-ros2 launch follow_me_gazebo follow_me.launch.py                 # Gazebo + RViz
-ros2 launch follow_me_gazebo follow_me.launch.py p_miss:=0.1 p_outlier:=0.02
-./build/follow_me_core/follow_me_offline_sim --seed 3            # C++ offline sim, no ROS
-./build/follow_me_core/follow_me_offline_sim --perfect-nav       # same, with perfect navigation
-
-# phase 4: radar-cued interception of an unknown drone
-ros2 launch follow_me_gazebo intercept.launch.py                 # Gazebo + RViz (+ foxglove:=true)
-./build/follow_me_core/follow_me_offline_sim --intercept --seed 2 --out ../out
-./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 300 --seed 7 --out ../out
-```
-
-### Figures, GIF, web replay, Foxglove
-
-```bash
-python3 tools/make_figures.py out/ docs/media/      # README figures + GIF + docs/replay/replay.json
-python3 -m http.server -d docs 8000                 # then http://localhost:8000/replay/
-tools/record_demo.sh out/demo                       # MCAP recording of a running launch (Ctrl+C)
-python3 tools/gen_world_extras.py                   # regenerate propellers + scenery in the worlds
-```
-
-- RViz shows the algorithms: predicted intercept point, approach line, predicted target path,
-  camera field of view, 3σ ellipsoids of the estimate and of every radar plot.
-- The camera panel shows a HUD (`hud_node`): mission phase, range, track source, learnt size, lock.
-- Foxglove Studio: `sudo apt install ros-jazzy-foxglove-bridge`, launch with `foxglove:=true`, open
-  `ws://localhost:8765` and import [docs/foxglove/follow_me_layout.json](docs/foxglove/follow_me_layout.json)
-  (also works on an MCAP recording).
-
-## What to look at (Python)
-
-| Figure | What it teaches |
+| | |
 |---|---|
-| Overview, separation | distance vs setpoint and `d_min`; grey/yellow bands = SEARCH/COAST |
-| Estimation, errors vs ±3σ | is the EKF consistent? (errors should stay inside the bounds, NEES ≈ 6) |
-| Estimation, NIS | the chi2 gate separating real detections from false ones |
-| Camera & control, image plane | where the leader sits in the image, outliers |
-| Camera & control, a_cmd | how estimation noise propagates into the commands |
+| ![Distance to the target](docs/media/intercept_distance.png) | ![Estimation error and learnt size](docs/media/intercept_estimation.png) |
+| **Distance** (log scale): 480 m → 8 m standoff, never below the 4 m minimum. Bands = mission phases. | **Estimation**: radar alone (metres), then radar + camera (decimetres) inside the filter's 3σ; the unknown target size is learnt in flight. |
+| ![Monte-Carlo](docs/media/montecarlo.png) | ![Random manoeuvres](docs/media/montecarlo_maneuvers.png) |
+| **300 randomised interceptions**: minimum distance, time to follow, follow quality. | **Random target manoeuvres**: safety and filter consistency (NEES, ideal 6) by target agility. |
 
-## Experiments to try
+One to three ground radars: ranges are precise, angles coarse; crossing sites trilaterate, and a
+site close to the area also fixes the altitude (1σ error of one scan, analytic):
 
-- `estimator.q_accel`: 0.3 vs 1.5 vs 10. Lag in turns vs noisy commands.
-- `camera.sigma_size_px` × 5: range becomes poor; watch the ±3σ bands and the distance error.
-- `control.ki = 0`: steady lag behind a moving leader (drag + wind).
-- `guidance.follow_dist = 5`: the safety filter starts working in the turns and stops.
-- `estimator.gate_chi2 = 1e9` (no gating): what the outliers do to the estimate.
-- `--occlusion 70 73` during the sharp turn: how fast the constant-velocity prediction diverges.
+![Radar geometry](docs/media/radar_geometry.png)
+
+Top view of the same flight, with every radar plot (target, own echo, clutter):
+
+![Top view](docs/media/intercept_overview.png)
+
+Details and all figures: [docs/RESULTS.md](docs/RESULTS.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Sensors
+    R[Ground radar<br/>2 Hz, 0.3 s late]
+    C[Gimbal camera<br/>Gazebo images]
+  end
+  R -->|plots| F
+  C --> D[Silhouette detector<br/>cued window]
+  D -->|bearing + size| F[FusionTracker<br/>IMM, OOSM replay,<br/>size learning]
+  F -->|window| D
+  F -->|target estimate + covariance| M[Mission<br/>PIP / hand-over / follow]
+  M --> S[Safety filter<br/>3 sigma, relative braking]
+  S -->|acceleration + yaw| FC[Flight controller<br/>Gazebo plugin, 500 Hz]
+  N[ESKF navigation] --> FC
+  N --> F
+  FC --> Q[Quadrotor 6-DOF]
+```
+
+The algorithms live in a ROS-free C++ library (`ros2_ws/src/follow_me_core`), used by the
+offline simulator, the unit tests and the ROS 2 nodes alike.
+
+## Quick start
+
+```bash
+cd ros2_ws && source /opt/ros/jazzy/setup.bash
+colcon build && colcon test && colcon test-result
+source install/setup.bash
+ros2 launch follow_me_gazebo intercept.launch.py                     # Gazebo + RViz, random target
+ros2 launch follow_me_gazebo intercept.launch.py radars:=3           # three ground radars
+./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 300 --out ../out   # no ROS
+```
+
+All commands (phase 1-3 scenarios, figures, Foxglove, diagnosis tools): [docs/USAGE.md](docs/USAGE.md).

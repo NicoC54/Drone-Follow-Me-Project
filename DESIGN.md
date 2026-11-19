@@ -251,10 +251,137 @@ unchanged (0 rejection); unit test with synthetic clutter.
   A thresholding silhouette detector needs a clean background: a cluttered horizon calls for a
   learnt detector. Kept as a documented limitation rather than a hidden tuning.
 
+### D36. Phase-4 Gazebo estimation gap: diagnosed and closed
+Method: `tools/diag_record.py` (detections, truth, gimbal, estimate, sim time) +
+`tools/diag_analyse.py` (truth reprojected at each frame). Detections were unbiased (lateral 0,
+vertical 3 cm, no time offset); the estimate followed its range measurement f W / s; the error
+was in the APPARENT SIZE, three causes:
+1. Aspect: the bounding-box width of an X quadrotor grows with its relative yaw (+17 % at 32 deg).
+   A slow error the filter averaged as white noise (NEES 37). -> detector `size_mode: moment`:
+   4 x horizontal standard deviation of the blob pixels; the sum of squared offsets of N rotors
+   on a circle is yaw-invariant. Spread 7 % -> 3.5 %. (Inflating the noise for correlation,
+   `size_aspect_tau`, made the filter consistent but 0.9 m inaccurate with 3.4 m minimum
+   distances offline: kept as an option, off.)
+2. Resolution: thresholding erodes small blobs (W = s z / f: 0.47 m at 50 m, 0.98 m at 10 m);
+   W learnt at hand-over range started 18 % short. -> `size_res_px` (4 px absolute uncertainty in
+   the size learning) + hand-over hold range driven by resolution (approach until ~20 px, never
+   closer than 12 m) so that small targets still converge (0.45 m targets waited forever at 25 m).
+3. Bearing-only updates ranged the target by parallax from a moving camera with a small attitude
+   bias (classic Cartesian bearings-only EKF over-confidence). -> bearing updates keep the range:
+   gain projected across the line of sight, Joseph form (`updateBearingKeepRange`).
+Result (Gazebo, grey quad): estimate RMSE 1.36 -> 0.26 m, NEES 37 -> 7.5, distance error 0.87 m.
+Also: the leader stopped instantly at the end of its plan (infinite deceleration); it now brakes.
+
+### D37. Random manoeuvres and replayable Monte-Carlo
+`--maneuvers 1|2`: random segments (speed 2-10 m/s, turn rate up to 30 / 70 deg/s, climb, hover,
+leader acceleration 2.5 / 5 m/s^2, altitude kept in 25-60 m). Each run has its own RNG stream:
+`--mc-run I` replays run I alone with logs. New metrics: NEES during the hand-over, time and phase
+of the minimum distance.
+
+### D38. IMM (calm + manoeuvre constant-velocity models)
+Two CV models (q = 3 and 40) with Markov switching (sojourn 10 s / 4 s), model-matched updates for
+the radar, the camera and the bearing-only camera, likelihood-weighted probabilities, inside the
+OOSM replay. Measured honestly: median NEES unchanged; at the aggressive level the 90th percentile
+of the hand-over NEES drops 21.6 -> 15.7; the violations do NOT change -> they were not caused by
+the target model. Kept for consistency in manoeuvres; `imm: false` gives the single CV model.
+
+### D39. Safety against an agile target
+Violations classified run by run (estimate error / sigma at the critical moment, closing speed):
+1. stopping-distance constraint assumed a constant target velocity; a target turning away less
+   quickly ate the margin -> guaranteed relative deceleration a_brake - a_target (4.5 - 2.5);
+2. hand-over hold range ignored the range uncertainty (radar-only sigma 3-4 m) -> hold at
+   d_min + 3 m + 3 sigma_range; margins at 3 sigma (k_sigma 2 -> 3).
+Runs below 4 m (300 each): scripted 0, moderate 26 -> 5 (1.7 %), aggressive 63 -> 80/300 still
+(27 %): a target braking at 5 m/s^2 and turning at 70 deg/s 8 m away is as agile as the follower;
+no 4 m guarantee is possible at that standoff. Next: standoff scaled with the target's observed
+agility, or evasive guidance.
+
+### D40. Unknown targets in Gazebo: random shape and size
+The phase-4 leader is no longer in intercept.sdf: intercept.launch.py spawns it
+(launch/target_models.py): quad_x, hexa or octo, scale 0.6-1.8, random or chosen
+(`target`, `target_scale`, `target_seed`). Checked: hexa x1.5 (2.2 m span) learnt 1.58 m in
+"moment" units (ratio 0.67 like the quad), FOLLOW at 35 s, 7.8 m minimum; octo x0.7 learnt
+0.89 m, FOLLOW at 44 s, estimate RMSE 0.43 m, NEES 9, 6.7 m minimum.
+
+### D41. Mid-course command low-pass
+The PIP is p_t + v_t tau, tau ~ 30 s: radar velocity noise times the time-to-go made the aim
+point jump by tens of metres at each scan; the follower hit its 35 deg tilt limit in cruise
+(Gazebo: p95 33 deg). First-order low-pass on the velocity command (1.5 s mid-course, 1 s
+hand-over), started from the current velocity. Cruise tilt p95 33 -> 15 deg (offline and Gazebo),
+interception time unchanged. Hand-over tilt (~17 deg mean) is physical: matching a target that
+turns at 15-20 deg/s at 9 m/s; a closing-speed ramp was tried and removed (no gain, later FOLLOW).
+
+### D42. The target is a real quadrotor
+Offline: TargetDrone = FollowerSim (6-DOF quadrotor + flight controller, truth navigation) flying
+the scenario as a reference: a = a_ref + 2.5 (v_ref - v) + 0.6 (p_ref - p), yaw = reference
+heading, 6 m/s^2 max; same wind as the follower. Gazebo: the spawned target carries the
+follower's FlightController plugin; leader_node is its pilot (same law, ground truth).
+`target_physics:=false` / `--kinematic-target` keeps the old kinematic target.
+Effects: the target tilts (Gazebo mean 9 deg, max 27 deg); the moment size is tilt-invariant too
+(W 1.012 / 1.014 / 1.003 / 0.994 m for 0-5 / 5-10 / 10-15 / 15-30 deg). Gazebo quad x1: estimate
+RMSE 0.65 m, NEES 14, 5.1 m minimum (kinematic: 0.26 m, 7.5): the remaining along-LOS bias
+(-1 m at 9-11 m) appears when the target accelerates away -> constant-velocity lag; next: a
+constant-acceleration model in the IMM. Offline 300 runs: 0 below 4 m (worst 4.87 m); random
+manoeuvres moderate 4/300, aggressive 69/300 (80 kinematic: a real target is thrust-limited too).
+
+### D43. Size noise recalibrated; showcase (CI, video, short README)
+- The second-moment size spreads 3.6 % frame to frame + 1.7 % slowly (Gazebo, physical target);
+  size_rel_noise 10 % (set for the bounding box) -> 5 %. Gazebo physical quad: estimate RMSE
+  0.65 -> 0.49 m, NEES 14 -> 12.6, along-LOS bias -0.50 -> -0.26 m. Offline 300 runs: worst
+  5.04 m, distance error 0.85 m; aggressive manoeuvres 69 -> 49/300 below 4 m. The rest is the
+  constant-velocity lag when the target accelerates (no residual pure delay: best shift 0.05 s).
+- CI (GitHub Actions): Python tests; ROS 2 Jazzy container, rosdep, build, 48 tests, and a
+  50-run Monte-Carlo that fails on any run below 4 m (regression guard of the whole loop).
+- Demo video generated from the simulation: chase camera added to a copy of the world
+  (chase_cam:=true), composed with the onboard HUD by tools/record_video.py (H.264, no ffmpeg).
+- README cut to a showcase page (pitch, results, mermaid architecture, quick start);
+  details in docs/RESULTS.md and docs/USAGE.md.
+
+### D44. "Jerks" when the target stops: an investigation, and a measured non-fix
+Measured first (Gazebo + offline): while the target hovers the follower is calm (2-7 deg tilt);
+the jolts (20-30 deg) come when it STOPS or RESTARTS (distance 8.6 -> 6.8 m, then 10.9 m).
+Hypotheses, each measured:
+1. safety buffer chattering (k_sigma 3 put the standoff at the buffer edge): rejected, k_sigma
+   2/3 and buffer 1.5-3 m change nothing offline;
+2. estimate noise: rejected, follower acceleration uncorrelated with the estimate's velocity
+   jumps, 90 % of its power below 1 Hz (a slow swing, not a jitter);
+3. estimate LAG of constant-velocity models: 9-state filter (TargetEkfCA: CV with a = 0, Singer
+   acceleration model) inside the IMM, acceleration feed-forward to the guidance. Result:
+   follows tighter (distance error 0.83 -> 0.66 m, stop excursion 6.8 -> 7.7 m) but the follower
+   works HARDER (tilt p95 26 -> 28-30 deg) and NEES 8 -> 11. A Singer model sees braking (-1.9 of
+   -2.5 m/s^2) but also +-1.5 m/s^2 of noise in steady flight; the IMM mixture is quiet but sees
+   only -0.7 (unit test). 4. smooth command (cap 3-4 m/s^2 + jerk limit): tilt p95 26 -> 18 deg
+   but the follower can no longer keep its place behind a turning 10 m/s target (2-11 m error).
+Conclusion: those accelerations are NEEDED to hold 8 m behind a target that stops and turns.
+Defaults unchanged (model imm_cv, no feed-forward, no cap); every variant stays available
+(`--set fusion.model=imm_singer intercept.a_ff_gain=1 intercept.follow_a_max=3`).
+
+### D45. Several ground radars (trilateration)
+Each scan carries the site of its radar; the tracker converts and associates per scan (nothing
+else changes: association, OOSM replay and track start are in world coordinates). Simulation:
+N radars, interleaved scans, datalink delivering in ARRIVAL order (different latencies).
+Sites: (-60,-40), (450,-100) (lines of sight crossing at ~90 deg), (230,420). 200 runs/level:
+horizontal radar-phase error 2.4-3.6 m -> 1.1-1.4 m (2 radars) -> 0.9-1.1 m (3); vertical
+3.2-3.7 -> 2.7-2.9 -> 1.5-1.7 m: two ground radars barely help the altitude (low elevation angles,
+VDOP), a third one CLOSE to the area does. FOLLOW 4-9 s earlier; aggressive manoeuvres 30 -> 24
+-> 17 runs below 4 m. Gazebo `radars:=3`: mid-course error 4-6 m -> 1-3 m, FOLLOW at 37 s instead
+of 43 s. First reading of the metric (3.84 -> 3.80 m "no gain") mixed horizontal, vertical and the
+start transient: split metrics. GDOP maps: docs/media/radar_geometry.png (tools/make_figures.py).
+
+### D46. RViz and HUD readability
+HUD drawn at 2x in two lines of large type (readable in a 600 px panel); dock layout stored in
+the RViz config (Qt state generated by tools/rviz_layout.py: RViz keeps panel sizes nowhere
+else); radar-plot 3-sigma "pancakes" hidden by default; labelled drones with halos, true distance
+on the link, estimate label (source + learnt size), phase-coloured mission label; the aim point
+is labelled "PIP" in mid-course and "standoff point (8 m behind target)" in the hand-over, where
+there is no rendezvous (approach 4 m/s < target 8 m/s) and the follower slides to its place.
+
 ## Next steps (ideas)
+- Range-rate (Doppler) of several radars to estimate the target velocity directly (D45).
+- Standoff adapted to the target's agility, or evasive guidance (D39, D44).
 - Learnt detector (small CNN / YOLO on the cued ROI) so that phase 4 works over scenery (D35).
-- Phase-4 Gazebo estimation gap (NEES ~30-40, 1.5 m error vs 0.2 m offline): reproject the truth
-  into the image to separate bbox-centre bias from model-origin offset and aspect changes.
+- Standoff adapted to the target's agility (D39), evasive guidance against a target that turns
+  back on the follower.
 - Leader acceleration in the state (CA model) or IMM CV/coordinated-turn.
 - Control barrier function for the separation instead of the heuristic filter.
 - Occlusion-aware guidance (keep the leader away from the sun / frame edges).
