@@ -24,11 +24,16 @@ std::vector<Segment> defaultScenario() {
 
 ManeuverParams ManeuverParams::level(int l) {
   ManeuverParams m;
-  if (l >= 2) {  // aggressive: sharp turns, quick speed changes, short segments
+  if (l >= 2) {  // aggressive: short legs, sharp and large turns, hard braking, more stops
+    m.v_min = 4.0;
+    m.leg_min = 3.0;
+    m.leg_max = 8.0;
+    m.dpsi_min = 60.0;
+    m.dpsi_max = 180.0;
+    m.turn_min_deg = 30.0;
     m.turn_max_deg = 70.0;
     m.climb_max = 2.0;
-    m.seg_min = 2.0;
-    m.seg_max = 6.0;
+    m.p_hover = 0.15;
     m.max_accel = 5.0;
   }
   return m;
@@ -37,20 +42,37 @@ ManeuverParams ManeuverParams::level(int l) {
 std::vector<Segment> randomScenario(std::uint64_t seed, double duration, const ManeuverParams& m) {
   std::mt19937_64 rng(seed);
   std::uniform_real_distribution<double> u(0.0, 1.0);
+  auto uni = [&](double a, double b) { return a + (b - a) * u(rng); };
   std::vector<Segment> s;
   double z = m.z0;  // altitude kept within [z_min, z_max] (dead reckoning of the climb rates)
-  for (double t = 0.0; t < duration;) {
-    Segment g{t, 0.0, 0.0, 0.0};
-    const double len = m.seg_min + (m.seg_max - m.seg_min) * u(rng);
-    if (u(rng) >= m.p_hover || t == 0.0) {
-      g.speed = m.v_min + (m.v_max - m.v_min) * u(rng);
-      g.turn_rate_deg = (2.0 * u(rng) - 1.0) * m.turn_max_deg * (u(rng) < 0.3 ? 0.0 : 1.0);  // some straight legs
-      g.climb_rate = (2.0 * u(rng) - 1.0) * m.climb_max;
+  double speed = uni(m.v_min, m.v_max);
+  auto push = [&](double t, double v, double turn, double len, bool climb) {
+    Segment g{t, v, turn, 0.0};
+    if (climb && u(rng) < 0.4) {  // some legs climb or descend
+      g.climb_rate = uni(-m.climb_max, m.climb_max);
       if (z + g.climb_rate * len < m.z_min || z + g.climb_rate * len > m.z_max) g.climb_rate = -g.climb_rate;
       z += g.climb_rate * len;
     }
     s.push_back(g);
-    t += len;
+    return t + len;
+  };
+  for (double t = 0.0; t < duration;) {
+    // straight leg
+    t = push(t, speed, 0.0, uni(m.leg_min, m.leg_max), true);
+    if (t >= duration) break;
+    // decisive manoeuvre
+    const double r = u(rng);
+    if (r < m.p_hover) {  // stop, then go again at a new speed
+      t = push(t, 0.0, 0.0, uni(m.hover_min, m.hover_max), false);
+      speed = uni(m.v_min, m.v_max);
+    } else if (r < m.p_hover + m.p_speed) {  // sprint or brake: the next leg has a new speed
+      speed = uni(m.v_min, m.v_max);
+    } else {  // turn by a chosen heading change at a chosen rate, then straight again
+      const double dpsi = uni(m.dpsi_min, m.dpsi_max), rate = uni(m.turn_min_deg, m.turn_max_deg);
+      const double sign = u(rng) < 0.5 ? -1.0 : 1.0;
+      if (u(rng) < 0.3) speed = uni(m.v_min, m.v_max);  // sometimes with a speed change
+      t = push(t, speed, sign * rate, dpsi / rate, false);
+    }
   }
   return s;
 }

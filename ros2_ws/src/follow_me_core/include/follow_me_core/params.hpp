@@ -18,15 +18,22 @@ struct Segment {
 
 std::vector<Segment> defaultScenario();
 
-// Random manoeuvres (Monte-Carlo): segments of random duration, each with a random speed, turn
-// rate and climb rate, bounded by what a small drone can do. Level 1 = moderate, 2 = aggressive.
+// Random manoeuvres (Monte-Carlo, Gazebo random flights). Like a real drone flown with a purpose:
+// STRAIGHT LEGS separated by DECISIVE MANOEUVRES (a turn of a chosen heading change at a chosen
+// rate, then straight again; a speed change; a stop). Level 1 = moderate, 2 = aggressive.
+// (Until 2026-11-19: every 2-10 s segment had its own constant random turn rate, so a 6 s segment
+// at 70 deg/s was a 420 deg spin: the target drew scribbles, not manoeuvres.)
 struct ManeuverParams {
-  double v_min = 2.0, v_max = 10.0;  // horizontal speed [m/s] (below the follower's 12-14 m/s)
-  double turn_max_deg = 30.0;        // [deg/s]
-  double climb_max = 1.0;            // [m/s]
-  double seg_min = 4.0, seg_max = 10.0;  // segment duration [s]
-  double p_hover = 0.1;              // probability of a hover segment
-  double max_accel = 2.5;            // leader acceleration limit [m/s^2]
+  double v_min = 3.0, v_max = 10.0;          // horizontal speed [m/s] (below the follower's 12-14 m/s)
+  double leg_min = 6.0, leg_max = 14.0;      // straight leg duration [s]
+  double dpsi_min = 30.0, dpsi_max = 120.0;  // heading change of a turn [deg]
+  double turn_min_deg = 10.0;                // turn rate range [deg/s]
+  double turn_max_deg = 30.0;
+  double climb_max = 1.0;                    // [m/s]
+  double p_hover = 0.1;                      // probability that a manoeuvre is a stop (hover)
+  double p_speed = 0.3;                      // probability that a manoeuvre is a speed change only
+  double hover_min = 3.0, hover_max = 6.0;   // [s]
+  double max_accel = 2.5;                    // leader acceleration limit [m/s^2]
   double z0 = 40.0, z_min = 25.0, z_max = 60.0;  // altitude: start and bounds [m]
   static ManeuverParams level(int l);
 };

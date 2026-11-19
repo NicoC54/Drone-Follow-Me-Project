@@ -72,7 +72,15 @@ TEST(RandomScenario, DeterministicAndBounded) {
     EXPECT_GE(z, mp.z_min - 1e-9);
     EXPECT_LE(z, mp.z_max + 1e-9);
   }
-  EXPECT_NE(randomScenario(43, 120.0, mp)[1].speed, a[1].speed);
+  EXPECT_NE(randomScenario(43, 120.0, mp)[0].speed, a[0].speed);
+  // purposeful manoeuvres, not scribbles: every turn is a bounded heading change, between legs
+  for (size_t i = 0; i < a.size(); ++i) {
+    const double len = (i + 1 < a.size() ? a[i + 1].t_start : 120.0) - a[i].t_start;
+    if (a[i].turn_rate_deg != 0.0) {
+      EXPECT_LE(std::abs(a[i].turn_rate_deg) * len, mp.dpsi_max + 1e-6);
+      if (i + 1 < a.size()) EXPECT_EQ(a[i + 1].turn_rate_deg, 0.0);  // followed by a straight leg
+    }
+  }
 }
 
 // While the range is uncertain (radar only), the hand-over waits further away.
