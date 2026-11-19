@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: Python sandbox (phase 1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy matplotlib pytest
+      - run: python -m pytest -q tests
+
+  ros2:
+    name: C++ / ROS 2 Jazzy build, 48 tests, Monte-Carlo smoke test
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
+        working-directory: ros2_ws
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (rosdep, from the package.xml files)
+        run: |
+          apt-get update
+          rosdep update --rosdistro jazzy
+          rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
+
+      - name: Build
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+      - name: Unit tests
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon test --event-handlers console_direct+
+          colcon test-result --verbose
+
+      - name: Monte-Carlo smoke test (50 randomised interceptions, 0 below 4 m)
+        run: |
+          ./build/follow_me_core/follow_me_offline_sim --intercept --montecarlo 50 --seed 7 --out /tmp
+          python3 - <<'EOF'
+          import csv
+          rows = list(csv.DictReader(open("/tmp/montecarlo.csv")))
+          follow = sum(float(r["t_follow"]) > 0 for r in rows)
+          viol = sum(float(r["min_distance"]) < 4.0 for r in rows)
+          worst = min(float(r["min_distance"]) for r in rows)
+          print(f"{len(rows)} runs: {follow} reach FOLLOW, {viol} below 4 m, worst {worst:.2f} m")
+          assert follow == len(rows) and viol == 0, "regression in the interception"
+          EOF
