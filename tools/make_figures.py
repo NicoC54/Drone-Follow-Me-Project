@@ -187,6 +187,99 @@ def fig_montecarlo(out, dst):
             "dist_err_median": float(np.median(m["follow_dist_err_rms"][ok]))}
 
 
+def fig_maneuvers(out, dst):
+    """Robustness to the target's manoeuvres: out/maneuvers/L{0,1,2}/montecarlo.csv."""
+    rows = []
+    for lvl, name in ((0, "scripted"), (1, "random,\nmoderate"), (2, "random,\naggressive")):
+        path = out / "maneuvers" / f"L{lvl}" / "montecarlo.csv"
+        if not path.exists():
+            return None
+        m = np.genfromtxt(path, delimiter=",", names=True)
+        ok = m["t_follow"] > 0
+        rows.append(dict(level=lvl, name=name, n=len(m), follow=int(ok.sum()),
+                         viol=int(np.sum(m["min_distance"] < D_MIN)),
+                         nees=float(np.median(m["handover_nees"])), nees90=float(np.percentile(m["handover_nees"], 90)),
+                         err=float(np.median(m["follow_est_err_rms"][ok]))))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.4))
+    x = np.arange(len(rows))
+    v = [100.0 * r["viol"] / r["n"] for r in rows]
+    axes[0].bar(x, v, color=FOLLOWER, width=0.55)
+    for xi, vi, r in zip(x, v, rows):
+        axes[0].text(xi, vi + 0.6, f"{r['viol']}/{r['n']}", ha="center", va="bottom", fontsize=9, color=INK)
+    axes[0].set_xticks(x, [r["name"] for r in rows])
+    axes[0].set_ylabel("runs below 4 m [%]")
+    axes[0].set_title("Safety vs target agility", loc="left", fontsize=11)
+    axes[1].bar(x - 0.15, [r["nees"] for r in rows], width=0.3, color=FOLLOWER, label="median")
+    axes[1].bar(x + 0.15, [r["nees90"] for r in rows], width=0.3, color=PHASE_COLORS[1], label="90th percentile")
+    axes[1].axhline(6.0, color=INK, lw=1, ls="--")
+    axes[1].text(len(rows) - 0.55, 6.3, "ideal 6", fontsize=8, color=INK, ha="right")
+    axes[1].set_xticks(x, [r["name"] for r in rows])
+    axes[1].set_ylabel("target NEES in hand-over")
+    axes[1].set_title("Filter consistency (IMM)", loc="left", fontsize=11)
+    axes[1].legend(loc="upper left")
+    fig.tight_layout()
+    fig.savefig(dst / "montecarlo_maneuvers.png", dpi=130)
+    plt.close(fig)
+    return rows
+
+
+RADAR_SITES = [(-60.0, -40.0, 3.0), (450.0, -100.0, 3.0), (230.0, 420.0, 3.0)]  # = intercept.launch.py
+SIGMA_R, SIGMA_AZ, SIGMA_EL = 2.0, np.radians(0.5), np.radians(0.8)               # = GroundRadarParams
+
+
+def radar_plot_info(p, site):
+    """Information matrix (inverse covariance) of one radar plot at position p (range + 2 angles)."""
+    d = p - site
+    r, rh = np.linalg.norm(d), np.linalg.norm(d[:2])
+    u_r = d / r                                                   # along the line of sight
+    if rh < 1e-6:  # right above the radar: azimuth undefined, any horizontal direction
+        rh, u_az = 1e-3, np.array([1.0, 0.0, 0.0])
+    else:
+        u_az = np.array([-d[1], d[0], 0.0]) / rh                  # horizontal, across
+    u_el = np.cross(u_r, u_az)                                    # vertical-ish, across
+    return (np.outer(u_r, u_r) / SIGMA_R ** 2 + np.outer(u_az, u_az) / (rh * SIGMA_AZ) ** 2
+            + np.outer(u_el, u_el) / (r * SIGMA_EL) ** 2)
+
+
+def fig_radar_geometry(s, dst, altitude=40.0):
+    """Precision of ONE scan of 1, 2, 3 ground radars over the engagement area (GDOP maps)."""
+    xs, ys = np.linspace(-150, 550, 141), np.linspace(-200, 500, 141)
+    fig, axes = plt.subplots(2, 3, figsize=(12, 7.6), sharex=True, sharey=True)
+    levels = [0.5, 1, 2, 3, 5, 8, 12, 20]
+    cmap = plt.get_cmap("Blues")  # one hue: light = precise, dark = large error
+    for k in range(3):
+        H, V = np.zeros((len(ys), len(xs))), np.zeros((len(ys), len(xs)))
+        for i, y in enumerate(ys):
+            for j, x in enumerate(xs):
+                p = np.array([x, y, altitude])
+                I = sum(radar_plot_info(p, np.array(site)) for site in RADAR_SITES[:k + 1])
+                P = np.linalg.inv(I)
+                H[i, j], V[i, j] = np.sqrt(P[0, 0] + P[1, 1]), np.sqrt(P[2, 2])
+        for row, (field, name) in enumerate(((H, "horizontal"), (V, "vertical"))):
+            ax = axes[row, k]
+            cf = ax.contourf(xs, ys, np.clip(field, 0.3, 25), levels=levels, cmap=cmap, extend="both")
+            cs = ax.contour(xs, ys, field, levels=[1, 2, 5, 10], colors=INK, linewidths=0.9)
+            ax.clabel(cs, fmt="%g m", fontsize=8)
+            ax.plot(s["lx"], s["ly"], color=LEADER, lw=2.0)
+            for site in RADAR_SITES[:k + 1]:
+                ax.scatter([site[0]], [site[1]], marker="^", s=80, c=PHASE_COLORS[1], edgecolor=SURFACE,
+                           linewidths=1.5, zorder=5)
+            ax.set_aspect("equal")
+            ax.grid(False)
+            if row == 0:
+                ax.set_title(f"{k + 1} radar{'s' if k else ''}", loc="left")
+            if k == 0:
+                ax.set_ylabel(f"{name} error, 1σ\nNorth [m]")
+            if row == 1:
+                ax.set_xlabel("East [m]")
+    fig.colorbar(cf, ax=axes, shrink=0.8, label="1σ position error of one scan [m]")
+    fig.suptitle(f"Ground-radar geometry at {altitude:.0f} m altitude (red: target path). Ranges are precise "
+                 "(2 m), angles coarse (0.5°/0.8°):\nseveral sites cross ranges against angles (trilateration); "
+                 "a close site also fixes the altitude.", x=0.01, ha="left", fontsize=10, color=INK2)
+    fig.savefig(dst / "radar_geometry.png", dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+
 def cov_ellipse_xy(row):
     P = np.array([[row["pxx"], row["pxy"]], [row["pxy"], row["pyy"]]])
     w, v = np.linalg.eigh(P)
@@ -286,9 +379,14 @@ def main():
     fig_distance(s, dst)
     fig_estimation(s, dst, true_size)
     mc = fig_montecarlo(out, dst)
+    man = fig_maneuvers(out, dst)
+    if man:
+        (dst / "montecarlo_maneuvers.json").write_text(json.dumps(man, indent=2))
+        print("Manoeuvres:", man)
     if mc:
         (dst / "montecarlo_summary.json").write_text(json.dumps(mc, indent=2))
         print("Monte-Carlo:", mc)
+    fig_radar_geometry(s, dst)
     make_gif(s, r, dst)
     export_replay(s, r, dst, true_size)
     print("written to", dst)

@@ -2,8 +2,8 @@
   "runs": 300,
   "follow_reached": 300,
   "violations": 0,
-  "min_distance_min": 5.28385,
-  "t_follow_mean": 38.9902,
-  "t_follow_std": 12.63174186827243,
-  "dist_err_median": 0.7800355
+  "min_distance_min": 5.03945,
+  "t_follow_mean": 44.00673333333334,
+  "t_follow_std": 7.469792232422235,
+  "dist_err_median": 0.8513235
 }

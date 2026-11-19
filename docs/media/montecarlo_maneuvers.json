@@ -1,0 +1,32 @@
+[
+  {
+    "level": 0,
+    "name": "scripted",
+    "n": 300,
+    "follow": 300,
+    "viol": 0,
+    "nees": 7.13297,
+    "nees90": 12.19397,
+    "err": 0.294621
+  },
+  {
+    "level": 1,
+    "name": "random,\nmoderate",
+    "n": 300,
+    "follow": 295,
+    "viol": 4,
+    "nees": 7.331145,
+    "nees90": 12.072860000000002,
+    "err": 0.322623
+  },
+  {
+    "level": 2,
+    "name": "random,\naggressive",
+    "n": 300,
+    "follow": 296,
+    "viol": 49,
+    "nees": 8.235759999999999,
+    "nees90": 12.7825,
+    "err": 0.35738899999999996
+  }
+]
