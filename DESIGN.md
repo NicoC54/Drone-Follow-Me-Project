@@ -376,7 +376,34 @@ on the link, estimate label (source + learnt size), phase-coloured mission label
 is labelled "PIP" in mid-course and "standoff point (8 m behind target)" in the hand-over, where
 there is no rendezvous (approach 4 m/s < target 8 m/s) and the follower slides to its place.
 
+### D47. Attitude reversals in FOLLOW: bumpless transfer at the follow entry
+- Symptom (Gazebo): thrust axis swinging 60 deg in 0.4 s (up to 212 deg/s). The position loop
+  saturates at 2.4 m/s of velocity error (kv 2.5, a_max 6): any setpoint step is bang-bang.
+- Measured triggers: (1) HANDOVER -> FOLLOW: two laws aiming at different points, command jump of
+  4.5-9.8 m/s^2 in one 10 ms step (offline: the 3 worst runs); (2) braking target seen edge-on:
+  apparent size -10 % for 0.3-0.6 s, the estimate moves the wrong way; (3) safety filter release.
+- Rejected: jerk limit after a phase change (Gazebo: target lost 2/2, the delay let the position
+  error grow, then the follower charged in); closing-speed limit in FOLLOW (distance error
+  1.10 -> 1.55 m); correlated size noise 0.3 s (estimate 0.40 -> 0.33 m, reversals unchanged);
+  silhouette thickness as an edge-on flag (catches 45 % of size dips for 14 % rejected frames).
+- Kept: bumpless transfer on entering FOLLOW only: the controller's velocity command starts from
+  its previous value, time constant 0.8 s decaying to 0 in 2 s, closing speed <= 4 m/s meanwhile
+  (at every phase change it also altered the hand-over approach: offline run at 3.96 m). Gazebo:
+  one-step jump 4.5-9.8 -> 0.4-0.7 m/s^2; offline 300 runs: worst swing (median) 260 -> 214 deg/s
+  (L0), 223 -> 172 (L1), same runs below 4 m, same distance error. Visible swings remain: the
+  follower arrives in FRONT of the target (journal 27) and must turn around at full authority.
+- Tools: /mission/debug, offline control.csv, follow_swing_p99/max, silhouette thickness.
+
+### D48. Random target flights in Gazebo
+`target_path:=random` (`target_maneuvers:=1|2`): the leader node flies `randomScenario` (the
+offline Monte-Carlo generator) from a start heading drawn within +-100 deg of the bearing to the
+follower (head-on to crossing; fully fleeing excluded: 2 m/s speed margin). One `target_seed`
+draws shape, size, flight plan and heading. Default stays `scripted` (reference flight, documented
+numbers). The offline Monte-Carlo does not draw the start heading yet.
+
 ## Next steps (ideas)
+- Hand-over geometry that brings the follower in from behind (removes the turn-around at the
+  follow entry, D47).
 - Range-rate (Doppler) of several radars to estimate the target velocity directly (D45).
 - Standoff adapted to the target's agility, or evasive guidance (D39, D44).
 - Learnt detector (small CNN / YOLO on the cued ROI) so that phase 4 works over scenery (D35).
