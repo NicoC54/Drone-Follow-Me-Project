@@ -423,7 +423,19 @@ below 4 m; scripted: up to 3). A comfort gain bought with safety: `intercept.rej
   smoothing delayed the reaction. Now only for an entry further than standoff + 4 m (the
   turn-around case), and a slower closing speed is never smoothed.
 
+### D51. Purposeful random manoeuvres; one flight per demo GIF
+- randomScenario drew a constant random turn rate for each 2-10 s segment: at 70 deg/s a 6 s
+  segment was a 420 deg spin, and the "aggressive" target drew scribbles. Now: straight legs
+  (6-14 s moderate, 3-8 s aggressive) separated by decisive manoeuvres: a turn of a chosen heading
+  change (30-120 / 60-180 deg) at a chosen rate (10-30 / 30-70 deg/s), a speed change, or a stop.
+  Monte-Carlo: moderate 4/300 below 4 m, aggressive 31/300 (in FOLLOW 37 -> 13 with D50).
+- Each README GIF shows ONE flight with its own estimation plots (range error along the line of
+  sight vs the filter's 3-sigma on that axis, learnt size, distance). A third "estimation" GIF from
+  the most flattering of four one-radar flights was dropped: selecting the best-looking flight
+  hid that the filter is over-confident against the aggressive target (inside 3-sigma 78 % vs 96 %).
+
 ## Next steps (ideas)
+- Filter consistency against very agile targets (inside 3-sigma 78 % in FOLLOW, D51).
 - Hand-over geometry that brings the follower in from behind without flying alongside a
   manoeuvring target (D49); evaluate the Monte-Carlo with random start headings.
 - Range-rate (Doppler) of several radars to estimate the target velocity directly (D45).

@@ -23,11 +23,13 @@ being a real quadrotor that tilts and is pushed by the wind: 300/300 reach FOLLO
 
 ## Random target manoeuvres (300 runs per level)
 
-The IMM keeps the filter consistent; safety holds against a moderately agile target (5/300 runs
-below 4 m, all in the hand-over). Against a target as agile as the follower itself, the follow
-distance now grows with the target's observed agility (8 m behind a calm target, up to 14 m behind
-an aggressive one, [DESIGN.md](../DESIGN.md) D50): runs below 4 m 43 -> 24/300, of which in FOLLOW
-29 -> 10. The rest happens in the hand-over, before the camera lock (radar-only range).
+Random flight plans are straight legs separated by decisive manoeuvres (turns of a chosen heading
+change, speed changes, stops; [DESIGN.md](../DESIGN.md) D51). The IMM keeps the filter consistent;
+safety holds against a moderately agile target (4/300 runs below 4 m, all in the hand-over).
+Against a target as agile as the follower itself, the follow distance grows with the target's
+observed agility (8 m behind a calm target, up to 14 m behind an aggressive one, D50): runs below
+4 m in FOLLOW 37 -> 13 (31/300 in total). The rest happens in the hand-over, before the camera lock
+(radar-only range).
 
 ![Manoeuvres](media/montecarlo_maneuvers.png)
 

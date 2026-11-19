@@ -7,16 +7,21 @@ A ground radar picks up an **unknown drone** 480 m away. A quadrotor flies to th
 intercept point, hands over to its own camera, **learns the target's size in flight**, then follows
 it at a safe distance. Everything between the sensors and the motors is written here, in C++.
 
-Two Gazebo flights, each shown as four synchronised views of the same instant (x4): chase camera,
-onboard camera with HUD, RViz (target **estimate** and its 3σ ellipsoid, aim point, camera field
-of view) and the top view of the whole engagement.
+Two Gazebo flights. Each GIF shows ONE flight: chase camera (horizon levelled), onboard camera
+with HUD, RViz, top view, and the same flight's estimation plots: range error along the line of
+sight against the filter's own 3σ on that axis, the unknown target size learnt in flight, and the
+distance to the target.
 
-![Situation 1: small quadrotor, oblique approach, moderate manoeuvres, three radars](docs/media/demo1.gif)
+![Situation 1: small quadrotor, moderate manoeuvres, three radars](docs/media/demo1.gif)
 
 ![Situation 2: octocopter twice as large, aggressive manoeuvres, three radars](docs/media/demo2.gif)
 
-*Random flight plans (`target_path:=random`, seeds 54 and 107), three ground radars: the follower
-never knows the target's shape, size or route. Minimum distance 7.0 m and 10.1 m (the agile octocopter is followed further away). **▶ [1-minute video](docs/media/demo.mp4)**.*
+*Random flight plans (`target_path:=random`, seeds 8 and 47): straight legs and decisive turns,
+stops and sprints; the follower never knows the target's shape, size or route. Minimum distance
+6.3 m and 5.9 m. In FOLLOW the range error stays under the filter's 3σ 96 % of the time in
+situation 1, but only 78 % against the aggressive octocopter: the filter is somewhat
+over-confident against a target as agile as the follower (a known limit).
+**▶ [1-minute video](docs/media/demo.mp4)**.*
 
 **[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
 **[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·
@@ -40,7 +45,7 @@ never knows the target's shape, size or route. Minimum distance 7.0 m and 10.1 m
 | | |
 |---|---|
 | 300 randomised interceptions (offline) | **300/300** reach follow, **0** below 4 m |
-| Random target manoeuvres, moderate / aggressive | 5 / **24** runs out of 300 below 4 m (aggressive: 49 before the agility-scaled standoff) |
+| Random target manoeuvres, moderate / aggressive | 4 / **31** runs out of 300 below 4 m (aggressive, in FOLLOW: 37 → 13 with the agility-scaled standoff) |
 | Gazebo, physical target (rendered images) | estimate error **0.49 m**, min distance 5.0 m |
 | Gazebo phase-4 gap, after ground-truth diagnosis | error 1.36 → 0.26 m, NEES 37 → 7.5 |
 | 1 → 3 ground radars (trilateration), radar-phase error | horizontal 2.4 → **0.9 m**, vertical 3.2 → **1.5 m** |
