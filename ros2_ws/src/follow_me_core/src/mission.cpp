@@ -1,5 +1,6 @@
 #include "follow_me_core/mission.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -89,6 +90,7 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
   switch (phase_) {
     case MissionPhase::Wait:
     case MissionPhase::Lost:
+      v_cmd_.reset();
       if (!hold_) hold_ = in.p_f;
       out.p_des = *hold_;
       out.v_des = Vec3::Zero();
@@ -105,20 +107,33 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
       // Velocity setpoint = target velocity + closing velocity limited to V (and 0 when blind
       // and already close: wait for the camera at a safe distance).
       Vec3 closing = rv.v_des;
-      if (handover && range < ip_.blind_hold_range) closing.setZero();
-      out.v_des = handover ? Vec3(in.v_t + closing) : closing;
+      double hold = ip_.blind_hold_range;
+      if (in.target_size > 0.0)
+        hold = std::clamp(ip_.camera_fx * in.target_size / ip_.resolve_px, ip_.hold_min, ip_.blind_hold_range);
+      hold = std::max(hold, ip_.d_min + ip_.hold_margin + ip_.k_range_sigma * in.range_sigma);
+      if (handover && range < hold) closing.setZero();
+      const Vec3 v_raw = handover ? Vec3(in.v_t + closing) : closing;
+      if (!v_cmd_) v_cmd_ = in.v_f;  // start from the current velocity: no step
+      const double tau = handover ? ip_.cmd_tau_handover : ip_.cmd_tau_midcourse;
+      *v_cmd_ += dt / (tau + dt) * (v_raw - *v_cmd_);
+      out.v_des = *v_cmd_;
       out.p_des = in.p_f + out.v_des * 0.5;  // velocity tracking (no position error to amplify)
       out.p_aim = rv.p_aim;
       out.t_go = std::isfinite(rv.t_go) ? rv.t_go : 0.0;
       out.v_max = handover ? in.v_t.norm() + ip_.handover_speed : ip_.approach_speed;
+      if (handover) out.a_ff = ip_.a_ff_gain * in.a_t;
       return out;
     }
     case MissionPhase::Follow: {
       hold_.reset();
+      v_cmd_.reset();
       const auto sp = guidance_.compute(in.p_f, in.p_t, in.v_t, dt);
       out.p_des = sp.p;
       out.v_des = sp.v;
       out.p_aim = sp.p;
+      out.a_ff = ip_.a_ff_gain * in.a_t;
+      out.a_max = ip_.follow_a_max;
+      out.jerk_max = ip_.follow_jerk_max;
       return out;
     }
   }

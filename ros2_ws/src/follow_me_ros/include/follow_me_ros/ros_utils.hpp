@@ -132,6 +132,7 @@ inline follow_me::SafetyParams declareSafety(rclcpp::Node& n) {
   s.k_rep = n.declare_parameter("safety.k_rep", s.k_rep);
   s.k_damp = n.declare_parameter("safety.k_damp", s.k_damp);
   s.a_brake = n.declare_parameter("safety.a_brake", s.a_brake);
+  s.a_target = n.declare_parameter("safety.a_target", s.a_target);
   s.k_speed = n.declare_parameter("safety.k_speed", s.k_speed);
   return s;
 }
@@ -200,6 +201,10 @@ inline follow_me::InterceptParams declareIntercept(rclcpp::Node& n) {
   i.handover_range = n.declare_parameter("intercept.handover_range", i.handover_range);
   i.handover_speed = n.declare_parameter("intercept.handover_speed", i.handover_speed);
   i.blind_hold_range = n.declare_parameter("intercept.blind_hold_range", i.blind_hold_range);
+  i.resolve_px = n.declare_parameter("intercept.resolve_px", i.resolve_px);
+  i.hold_min = n.declare_parameter("intercept.hold_min", i.hold_min);
+  i.camera_fx = n.has_parameter("camera.fx") ? n.get_parameter("camera.fx").as_double()
+                                             : n.declare_parameter("camera.fx", i.camera_fx);
   i.lock_lost_time = n.declare_parameter("intercept.lock_lost_time", i.lock_lost_time);
   return i;
 }

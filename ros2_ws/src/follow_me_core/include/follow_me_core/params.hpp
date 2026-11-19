@@ -1,6 +1,7 @@
 // All tunable parameters, with the same defaults as the Python reference (follow_me/config.py).
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "follow_me_core/types.hpp"
@@ -16,6 +17,20 @@ struct Segment {
 };
 
 std::vector<Segment> defaultScenario();
+
+// Random manoeuvres (Monte-Carlo): segments of random duration, each with a random speed, turn
+// rate and climb rate, bounded by what a small drone can do. Level 1 = moderate, 2 = aggressive.
+struct ManeuverParams {
+  double v_min = 2.0, v_max = 10.0;  // horizontal speed [m/s] (below the follower's 12-14 m/s)
+  double turn_max_deg = 30.0;        // [deg/s]
+  double climb_max = 1.0;            // [m/s]
+  double seg_min = 4.0, seg_max = 10.0;  // segment duration [s]
+  double p_hover = 0.1;              // probability of a hover segment
+  double max_accel = 2.5;            // leader acceleration limit [m/s^2]
+  double z0 = 40.0, z_min = 25.0, z_max = 60.0;  // altitude: start and bounds [m]
+  static ManeuverParams level(int l);
+};
+std::vector<Segment> randomScenario(std::uint64_t seed, double duration, const ManeuverParams& m);
 
 struct LeaderParams {
   Vec3 start_pos = Vec3(0.0, 0.0, 20.0);
@@ -167,12 +182,17 @@ struct GuidanceParams {
 struct SafetyParams {
   double d_min = 4.0;
   double buffer = 3.0;
-  double k_sigma = 2.0;
+  double k_sigma = 3.0;    // margin in standard deviations of the estimate along the line of sight
   double k_rep = 6.0;
   double k_damp = 2.0;
   // Stopping-distance speed limit: never close in faster than sqrt(2 a_brake (d - d_min)),
   // i.e. the speed from which a_brake can still stop before d_min (CBF-like constraint).
-  double a_brake = 3.0;    // braking deceleration assumed available [m/s^2] (half of a_max)
+  double a_brake = 4.5;    // braking deceleration available to the follower [m/s^2] (75 % of a_max)
+  // The TARGET can also brake or turn: its velocity along the line of sight can drop by up to
+  // a_target. Guaranteed relative deceleration = a_brake - a_target. (Monte-Carlo with random
+  // manoeuvres: assuming a constant target velocity, a target turning away less quickly ate the
+  // margin while the follower closed in at 12 m/s during the hand-over.)
+  double a_target = 2.5;   // [m/s^2]
   double k_speed = 3.0;    // gain on the excess closing speed [1/s]
 };
 

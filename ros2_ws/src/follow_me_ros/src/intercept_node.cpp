@@ -74,7 +74,10 @@ class InterceptNode : public rclcpp::Node {
                         est_->target_size_sigma / est_->target_size < size_known_rel_;
 
     // ---- mission ----
-    const auto out = mission_.update({now, odom_->p, odom_->v, has_track, locked, p_t, v_t}, dt);
+    const double size = has_track ? est_->target_size : 0.0;
+    const Vec3 los = (p_t - odom_->p).norm() > 1e-6 ? Vec3((p_t - odom_->p).normalized()) : Vec3::UnitX();
+    const double range_sigma = std::sqrt(std::max(los.dot(P * los), 0.0));
+    const auto out = mission_.update({now, odom_->p, odom_->v, has_track, locked, p_t, v_t, size, range_sigma}, dt);
     if (out.phase != last_phase_) {
       RCLCPP_INFO(get_logger(), "mission %s -> %s (range %.0f m)", follow_me::toString(last_phase_),
                   follow_me::toString(out.phase), has_track ? (p_t - odom_->p).norm() : -1.0);
@@ -142,9 +145,15 @@ class InterceptNode : public rclcpp::Node {
     txt.pose.position = geometry_msgs::msg::Point();
     txt.pose.position.x = odom_->p.x();
     txt.pose.position.y = odom_->p.y();
-    txt.pose.position.z = odom_->p.z() + 1.5;
-    txt.scale.z = 0.6;  // readable in the close follow view
-    txt.color.r = txt.color.g = txt.color.b = 1.0f;
+    txt.pose.position.z = odom_->p.z() + 2.6;  // above the monitor "FOLLOWER" label
+    txt.scale.z = 0.6;
+    // Same phase colours as the HUD, the figures and the web replay.
+    switch (out.phase) {
+      case MissionPhase::Midcourse: txt.color = follow_me_ros::rgba(0.92f, 0.41f, 0.20f, 1.0f); break;
+      case MissionPhase::Handover: txt.color = follow_me_ros::rgba(0.93f, 0.63f, 0.0f, 1.0f); break;
+      case MissionPhase::Follow: txt.color = follow_me_ros::rgba(0.11f, 0.69f, 0.48f, 1.0f); break;
+      default: txt.color = follow_me_ros::rgba(0.66f, 0.66f, 0.64f, 1.0f); break;
+    }
     txt.text = std::string("MISSION: ") + follow_me::toString(out.phase) + (has_track ? "" : " (no track)");
     arr.markers.push_back(txt);
 
@@ -199,12 +208,33 @@ class InterceptNode : public rclcpp::Node {
     info.ns = "pip_text";
     info.action = aim.action;
     info.pose.position = follow_me_ros::toPoint(out.p_aim + Vec3(0, 0, 3.0));
-    info.scale.z = 2.0;
+    info.scale.z = out.phase == MissionPhase::Handover ? 1.0 : 2.0;
     info.color = orange;
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "PIP  t_go %.0f s", out.t_go);
+    // The aim is never the target itself but its STANDOFF point (8 m behind it, along its
+    // velocity). Mid-course: where we meet that point in the future (PIP). Hand-over: the follower
+    // matches the target velocity + 4 m/s towards the CURRENT standoff point (no rendezvous: the
+    // target is faster than 4 m/s), so it is labelled as such, not as a PIP.
+    if (out.phase == MissionPhase::Handover)
+      std::snprintf(buf, sizeof(buf), "standoff point (8 m behind target)");
+    else if (out.t_go > 0.0)
+      std::snprintf(buf, sizeof(buf), "PIP  t_go %.0f s", out.t_go);
+    else
+      std::snprintf(buf, sizeof(buf), "standoff point (pursuit)");  // no rendezvous solution
     info.text = buf;
     arr.markers.push_back(info);
+
+    Marker tether;  // hand-over: the standoff point hangs 8 m behind the target estimate
+    tether.header = m.header;
+    tether.ns = "standoff_tether";
+    tether.action = (pip && out.phase == MissionPhase::Handover) ? Marker::ADD : Marker::DELETE;
+    tether.type = Marker::LINE_LIST;
+    tether.pose.orientation.w = 1.0;
+    tether.scale.x = 0.08;
+    tether.color = follow_me_ros::rgba(0.92f, 0.41f, 0.20f, 0.6f);
+    tether.points.push_back(follow_me_ros::toPoint(p_t));
+    tether.points.push_back(follow_me_ros::toPoint(out.p_aim));
+    arr.markers.push_back(tether);
     pub_mk_->publish(arr);
   }
 

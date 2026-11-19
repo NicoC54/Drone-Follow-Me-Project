@@ -25,7 +25,33 @@ struct InterceptParams {
   double approach_speed = 12.0;   // midcourse speed [m/s] (v_max of the follower = 14)
   double handover_range = 80.0;   // start the hand-over below this range [m]
   double handover_speed = 4.0;    // max closing speed while waiting for the camera lock [m/s]
-  double blind_hold_range = 25.0; // never come closer than this without the camera lock [m]
+  double blind_hold_range = 25.0; // never come closer than this without the camera lock [m]...
+  // ...unless the target is too small to learn its size from there: approach until it spans
+  // resolve_px pixels (f W / resolve_px), never closer than hold_min (Monte-Carlo: 0.45 m targets
+  // were 7 px at 25 m, their size never converged, the mission waited forever).
+  double resolve_px = 20.0;
+  double camera_fx = 400.0;       // [px]
+  double hold_min = 12.0;         // [m]
+  // ...and never closer than d_min + hold_margin + k_range_sigma * range_sigma: while the range
+  // comes from the radar alone (sigma 3-4 m), wait further away (Monte-Carlo, random manoeuvres:
+  // hand-over violations with 5-9 m range errors).
+  double d_min = 4.0, hold_margin = 3.0, k_range_sigma = 3.0;
+  // Low-pass on the velocity command before the follow phase. The PIP is p_t + v_t tau with
+  // tau ~ 30 s: the target velocity noise of the radar track is multiplied by the time-to-go,
+  // the aim point jumped by tens of metres at every scan and the follower hit its 35 deg tilt
+  // limit in cruise (Gazebo). Far away a few degrees of heading error cost nothing.
+  double cmd_tau_midcourse = 1.5, cmd_tau_handover = 1.0;  // [s]
+  // Feed-forward of the target acceleration while matching its motion (hand-over, follow): the
+  // follower brakes WITH a stopping target instead of after it (jerks of up to 30 deg tilt).
+  double a_ff_gain = 0.0;  // off by default: see FusionParams::model (measured, not smoother)
+  // Smooth ride in FOLLOW: the nominal acceleration is capped (the target brakes at <= 2.5 m/s^2)
+  // and its rate of change limited; the safety filter keeps its full authority after that.
+  // Measured: "jerks" of up to 30 deg tilt when the target stopped or restarted came from the
+  // command's aggressiveness, not from the estimate's lag.
+  // Measured: capping at 3-4 m/s^2 removed the tilt peaks but the follower could not keep its
+  // place behind a turning 10 m/s target (distance error 0.8 -> 2-11 m). Off by default (< 0).
+  double follow_a_max = -1.0;     // [m/s^2] (3.0 = ~17 deg tilt)
+  double follow_jerk_max = -1.0;  // [m/s^3]
   double lock_lost_time = 3.0;    // FOLLOW without camera for this long -> back to HANDOVER [s]
 };
 
@@ -55,6 +81,9 @@ class MissionManager {
     bool camera_locked;     // hand-over criterion: camera locked AND able to range (size learnt);
                             // locking at 80 m with the range from the radar only came too close
     Vec3 p_t, v_t;          // target estimate
+    double target_size = 0.0;  // current size estimate [m] (0: unknown -> fixed blind_hold_range)
+    double range_sigma = 0.0;  // estimate uncertainty along the line of sight [m]
+    Vec3 a_t = Vec3::Zero();   // target acceleration estimate (IMM; ~0 when it flies steadily)
   };
   struct Output {
     MissionPhase phase;
@@ -63,6 +92,9 @@ class MissionManager {
     bool hold;              // true: hold position (no track, or blind and too close)
     Vec3 p_aim = Vec3::Zero();  // where we are heading: PIP (midcourse/hand-over), follow point (FOLLOW)
     double t_go = 0.0;          // PIP time to go [s] (0 outside midcourse/hand-over)
+    Vec3 a_ff = Vec3::Zero();   // acceleration feed-forward for the position controller
+    double a_max = -1.0;        // nominal acceleration cap for this phase (< 0: none)
+    double jerk_max = -1.0;     // nominal jerk limit for this phase (< 0: none)
   };
   Output update(const Input& in, double dt);
   MissionPhase phase() const { return phase_; }
@@ -74,6 +106,7 @@ class MissionManager {
   MissionPhase phase_ = MissionPhase::Wait;
   double t_lock_ok_ = -1e9;
   std::optional<Vec3> hold_;
+  std::optional<Vec3> v_cmd_;  // filtered velocity command (MIDCOURSE / HANDOVER)
 };
 
 }  // namespace follow_me

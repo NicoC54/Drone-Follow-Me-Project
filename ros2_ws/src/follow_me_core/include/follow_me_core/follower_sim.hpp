@@ -17,11 +17,11 @@ namespace follow_me {
 // truePosition() is for the simulator (detector, metrics) only.
 class FollowerSim {
  public:
-  explicit FollowerSim(const SimConfig& cfg, Vec3 start = Vec3::Constant(NAN))
+  explicit FollowerSim(const SimConfig& cfg, Vec3 start = Vec3::Constant(NAN), double yaw0 = 0.0)
       : quad_on_(cfg.quadrotor),
         nav_on_(cfg.quadrotor && cfg.use_nav),
         pm_(cfg.follower, cfg.seed),
-        quad_(cfg.quad, std::isnan(start.x()) ? cfg.follower.start_pos : start, 0.0, cfg.seed),
+        quad_(cfg.quad, std::isnan(start.x()) ? cfg.follower.start_pos : start, yaw0, cfg.seed),
         att_(cfg.attitude, cfg.quad),
         sensors_(cfg.nav_sensors, cfg.seed + 11),
         nav_(cfg.nav_sensors, cfg.nav_filter) {

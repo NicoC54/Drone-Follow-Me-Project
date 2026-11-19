@@ -43,8 +43,11 @@ TEST_P(Intercept, AcquiresInterceptsHandsOverAndFollowsSafely) {
   EXPECT_GT(m.t_track, 0.0);
   EXPECT_LT(m.t_track, 3.0);           // radar track within a few scans
   EXPECT_GT(m.t_follow, 0.0);
-  EXPECT_LT(m.t_follow, 40.0);         // ~480 m covered at 12 m/s + hand-over
-  EXPECT_GT(m.follow_pct, 60.0);
+  // ~480 m at 12 m/s (~35 s) + hand-over. The hand-over waits for the size to be known to 8 %,
+  // learnt mostly from well-resolved views (size_res_px: far views weigh little), ~20 s.
+  EXPECT_LT(m.t_follow, 70.0);
+  EXPECT_GT(m.follow_pct, 40.0);
+  EXPECT_LT(m.follow_nees, 12.0);      // consistent filter (ideal 6; 2x margin for 1 run)
   EXPECT_GT(m.min_distance, cfg.base.safety.d_min);
   EXPECT_LT(m.follow_dist_err_rms, 1.5);
   EXPECT_NEAR(m.size_est, cfg.target_size, 3.0 * m.size_sigma);
@@ -53,3 +56,38 @@ TEST_P(Intercept, AcquiresInterceptsHandsOverAndFollowsSafely) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Seeds, Intercept, ::testing::Values(1, 4));
+
+TEST(RandomScenario, DeterministicAndBounded) {
+  const ManeuverParams mp = ManeuverParams::level(2);
+  const auto a = randomScenario(42, 120.0, mp), b = randomScenario(42, 120.0, mp);
+  ASSERT_EQ(a.size(), b.size());
+  double z = mp.z0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    EXPECT_EQ(a[i].speed, b[i].speed);
+    EXPECT_LE(a[i].speed, mp.v_max);
+    EXPECT_LE(std::abs(a[i].turn_rate_deg), mp.turn_max_deg);
+    const double len = (i + 1 < a.size() ? a[i + 1].t_start : 120.0) - a[i].t_start;
+    z += a[i].climb_rate * len;
+    EXPECT_GE(z, mp.z_min - 1e-9);
+    EXPECT_LE(z, mp.z_max + 1e-9);
+  }
+  EXPECT_NE(randomScenario(43, 120.0, mp)[1].speed, a[1].speed);
+}
+
+// While the range is uncertain (radar only), the hand-over waits further away.
+TEST(Mission, HandoverHoldGrowsWithRangeUncertainty) {
+  const InterceptParams ip;
+  GuidanceParams gp;
+  auto closing = [&](double range_sigma) {
+    MissionManager mm(ip, gp);
+    MissionManager::Input in{0.0, Vec3(0, 0, 40), Vec3::Zero(), true, false,
+                             Vec3(16, 0, 40), Vec3::Zero(), 0.4, range_sigma};
+    MissionManager::Output out{};
+    for (int k = 0; k < 300; ++k) out = mm.update(in, 0.01);  // 3 s: past the command low-pass
+    EXPECT_EQ(out.phase, MissionPhase::Handover);
+    return out.v_des.x();  // > 0: still closing in
+  };
+  // 0.4 m target: resolved (20 px) at 8 m -> hold_min 12 m.
+  EXPECT_GT(closing(0.5), 0.1);          // max(12, 4 + 3 + 3 x 0.5) = 12 m < 16 m: closes in
+  EXPECT_NEAR(closing(4.0), 0.0, 1e-9);  // max(12, 4 + 3 + 3 x 4) = 19 m > 16 m: holds
+}

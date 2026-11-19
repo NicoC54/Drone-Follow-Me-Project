@@ -1,6 +1,8 @@
 // Control: cascaded position (P) / velocity (PI) controller + separation safety filter.
 #pragma once
 
+#include <optional>
+
 #include "follow_me_core/params.hpp"
 #include "follow_me_core/types.hpp"
 
@@ -15,8 +17,9 @@ class PositionController {
 
   void reset() { integral_.setZero(); }
   // v_max_override > 0: speed limit for this call (mission phases), otherwise v_max.
+  // a_ff: acceleration feed-forward (e.g. the target's estimated acceleration while following it).
   Vec3 compute(const Vec3& p, const Vec3& v, const Vec3& p_des, const Vec3& v_des, double dt,
-               double v_max_override = -1.0);
+               double v_max_override = -1.0, const Vec3& a_ff = Vec3::Zero());
 
  private:
   ControlParams p_;
@@ -30,6 +33,26 @@ class PositionController {
 //     which braking still stops before d_min. Any excess is braked (stopping-distance limit).
 //  2. Inside the buffer zone: remove the command component towards the leader, add repulsion +
 //     closing-speed damping.
+// Limits how fast the acceleration command may change (jerk): a smooth ride. Applied to the
+// NOMINAL command only; the safety filter acts after it, with full authority.
+class JerkLimiter {
+ public:
+  explicit JerkLimiter(double jerk_max) : jerk_max_(jerk_max) {}
+  Vec3 apply(const Vec3& a, double dt) {
+    if (!prev_ || jerk_max_ <= 0.0) return *(prev_ = a);
+    const Vec3 d = a - *prev_;
+    const double step = jerk_max_ * dt;
+    *prev_ += d.norm() > step ? Vec3(d * (step / d.norm())) : d;
+    return *prev_;
+  }
+  void reset(const std::optional<Vec3>& a = std::nullopt) { prev_ = a; }
+  void setMax(double jerk_max) { jerk_max_ = jerk_max; }
+
+ private:
+  double jerk_max_;
+  std::optional<Vec3> prev_;
+};
+
 class SafetyFilter {
  public:
   SafetyFilter(const SafetyParams& p, double a_max) : p_(p), a_max_(a_max) {}
