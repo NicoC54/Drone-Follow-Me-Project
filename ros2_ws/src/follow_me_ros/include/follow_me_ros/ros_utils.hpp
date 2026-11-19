@@ -214,6 +214,10 @@ inline follow_me::InterceptParams declareIntercept(rclcpp::Node& n) {
   i.bumpless_tau = n.declare_parameter("intercept.bumpless_tau", i.bumpless_tau);
   i.bumpless_time = n.declare_parameter("intercept.bumpless_time", i.bumpless_time);
   i.bumpless_close_speed = n.declare_parameter("intercept.bumpless_close_speed", i.bumpless_close_speed);
+  i.rejoin = n.declare_parameter("intercept.rejoin", i.rejoin);
+  i.agile_gain = n.declare_parameter("intercept.agile_gain", i.agile_gain);
+  i.agile_ref = n.declare_parameter("intercept.agile_ref", i.agile_ref);
+  i.agile_max_dist = n.declare_parameter("intercept.agile_max_dist", i.agile_max_dist);
   return i;
 }
 

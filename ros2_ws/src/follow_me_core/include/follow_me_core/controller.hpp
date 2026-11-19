@@ -25,7 +25,9 @@ class PositionController {
   // change): the acceleration command is continuous although the guidance law switched.
   Vec3 compute(const Vec3& p, const Vec3& v, const Vec3& p_des, const Vec3& v_des, double dt,
                double v_max_override = -1.0, const Vec3& a_ff = Vec3::Zero(), double v_rel_max = -1.0,
-               double v_cmd_tau = -1.0);
+               double v_cmd_tau = -1.0, const Vec3& to_target = Vec3::Zero());
+  // to_target (unit vector towards the target, or zero): the smoothing never delays a command
+  // that closes in more slowly; along that axis the new law applies at once (safety first).
 
  private:
   ControlParams p_;

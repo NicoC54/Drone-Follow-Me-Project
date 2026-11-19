@@ -66,6 +66,7 @@ struct InterceptMetrics {
   double target_max_tilt = 0;       // [deg] (0 for a kinematic target)
   double follow_acc_p95 = 0, follow_tilt_p95 = 0;  // smoothness in FOLLOW [m/s^2], [deg]
   double follow_swing_p99 = 0, follow_swing_max = 0;  // thrust-axis swing rate in FOLLOW [deg/s]
+  double follow_entry_swing_max = 0;  // same, first 5 s of FOLLOW (turn-around at the entry) [deg/s]
   double radar_phase_err_rms = 0;   // estimate error in MIDCOURSE + HANDOVER (radar-led) [m]
   double radar_phase_err_h = 0, radar_phase_err_v = 0;  // its horizontal / vertical parts [m]         // target NEES during the hand-over (radar range + camera bearing)           // target NEES (position + velocity, ideal 6) in FOLLOW
   int phase_changes = 0;

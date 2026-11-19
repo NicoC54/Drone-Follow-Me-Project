@@ -90,7 +90,7 @@ class InterceptNode : public rclcpp::Node {
 
     // ---- control + safety ----
     Vec3 a_cmd = controller_.compute(odom_->p, odom_->v, out.p_des, out.v_des, dt, out.v_max, Vec3::Zero(), out.v_rel_max,
-                                     out.v_cmd_tau);
+                                     out.v_cmd_tau, out.to_target);
     if (out.a_max > 0) a_cmd = follow_me::saturate(a_cmd, out.a_max);
     if (out.jerk_max > 0) {  // bumpless phase transitions (and optional smooth follow), before safety
       jerk_.setMax(out.jerk_max);

@@ -83,7 +83,10 @@ int main(int argc, char** argv) {
                                   "intercept.follow_jerk_max", "intercept.transition_jerk",
                                   "intercept.transition_time", "intercept.follow_close_speed",
                                   "intercept.bumpless_tau", "intercept.bumpless_time", "intercept.bumpless_close_speed",
-                                  "target.maneuver_seed", "target.heading", "radar.count", "radar.third"};
+                                  "target.maneuver_seed", "target.heading", "intercept.rejoin",
+                                  "intercept.rejoin_back", "intercept.rejoin_side", "intercept.follow_entry_timeout",
+                                  "intercept.agile_gain", "intercept.agile_ref", "intercept.agile_max_dist",
+                                  "intercept.agile_tau", "radar.count", "radar.third"};
     if (std::none_of(std::begin(known), std::end(known), [&](const char* k) { return kv.first == k; })) {
       std::fprintf(stderr, "unknown --set key %s\n", kv.first.c_str());
       return 1;
@@ -112,6 +115,14 @@ int main(int argc, char** argv) {
       // Same target as a Gazebo run with target_path:=random target_seed:=N (heading drawn by the launch)
       else if (k == "target.maneuver_seed") c.maneuver_seed = std::stoull(v);
       else if (k == "target.heading") c.base.leader.start_heading_deg = std::stod(v);
+      else if (k == "intercept.rejoin") c.intercept.rejoin = v == "1" || v == "true";
+      else if (k == "intercept.rejoin_back") c.intercept.rejoin_back = std::stod(v);
+      else if (k == "intercept.rejoin_side") c.intercept.rejoin_side = std::stod(v);
+      else if (k == "intercept.follow_entry_timeout") c.intercept.follow_entry_timeout = std::stod(v);
+      else if (k == "intercept.agile_gain") c.intercept.agile_gain = std::stod(v);
+      else if (k == "intercept.agile_ref") c.intercept.agile_ref = std::stod(v);
+      else if (k == "intercept.agile_max_dist") c.intercept.agile_max_dist = std::stod(v);
+      else if (k == "intercept.agile_tau") c.intercept.agile_tau = std::stod(v);
       else if (k == "radar.count") {  // 2: second radar at (450, -100, 3), same draws as the first
         c.extra_radars.clear();
         if (std::stoi(v) >= 2) c.extra_radars.push_back(follow_me::InterceptConfig::secondRadarSite(c.radar));

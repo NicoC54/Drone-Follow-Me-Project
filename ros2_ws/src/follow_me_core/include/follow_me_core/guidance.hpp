@@ -17,6 +17,8 @@ class FollowGuidance {
   explicit FollowGuidance(const GuidanceParams& p) : p_(p) {}
 
   void reset() { angle_.reset(); }
+  // Standoff distance used from now on (agility-scaled by the mission; default GuidanceParams).
+  void setFollowDist(double d) { p_.follow_dist = d; }
 
   struct Setpoint {
     Vec3 p;  // desired follower position

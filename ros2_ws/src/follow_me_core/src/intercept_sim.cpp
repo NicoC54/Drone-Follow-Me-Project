@@ -105,7 +105,7 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
   InterceptMetrics m;
   m.initial_range = (follower.truePosition() - leader.position()).norm();
   const int n_steps = static_cast<int>(std::lround(b.duration / dt));
-  const double settle = 5.0, d_ref = std::hypot(b.guidance.follow_dist, b.guidance.height_offset);
+  const double settle = 5.0;
   double next_frame = 0.0, hold_yaw = 0.0, t_follow_start = -1.0;
   double s_derr2 = 0, s_eerr2 = 0, s_nees = 0, s_hnees = 0;
   std::vector<double> follow_acc, follow_tilt;
@@ -206,7 +206,7 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
     if (out.phase == MissionPhase::Follow && m.t_follow < 0) m.t_follow = t;
     Vec3 a_cmd = controller.compute(follower.position(), follower.velocity(), out.p_des, out.v_des,
                                     dt, out.v_max, out.a_ff, out.v_rel_max,
-                                    out.v_cmd_tau);
+                                    out.v_cmd_tau, out.to_target);
     if (out.a_max > 0) a_cmd = saturate(a_cmd, out.a_max);
     if (out.jerk_max > 0) {
       jerk.setMax(out.jerk_max);
@@ -266,13 +266,18 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
     }
     if (out.phase == MissionPhase::Follow) {
       const Vec3 zb = follower.trueAttitude() * Vec3::UnitZ();
-      if (prev_thrust_axis)
+      if (prev_thrust_axis) {
         follow_swing.push_back(rad2deg(std::acos(std::clamp(zb.dot(*prev_thrust_axis), -1.0, 1.0))) / dt);
+        if (t_follow_start >= 0.0 && t - t_follow_start < 5.0)  // the entry into FOLLOW
+          m.follow_entry_swing_max = std::max(m.follow_entry_swing_max, follow_swing.back());
+      }
       prev_thrust_axis = zb;
       ++n_follow;
       if (t_follow_start < 0) t_follow_start = t;
       if (t - t_follow_start > settle) {
         ++n_follow_stat;
+        // error to the CURRENT standoff (agility-scaled since 2026-11-19), not to a fixed 8 m
+        const double d_ref = std::hypot(mission.followDistance(), b.guidance.height_offset);
         s_derr2 += (dist - d_ref) * (dist - d_ref);
         s_eerr2 += (est.position() - leader.position()).squaredNorm();
         Vec6 e;
@@ -366,7 +371,7 @@ void runInterceptMonteCarlo(int n, std::uint64_t seed0, const std::string& csv_p
   csv << "run,seed,wind,radar_latency,clutter,target_size,initial_range,t_track,t_lock,t_follow,"
          "min_distance,time_below_dmin,follow_dist_err_rms,follow_est_err_rms,follow_pct,size_est,follow_nees,"
          "t_min_distance,phase_min_distance,handover_nees,follow_acc_p95,follow_tilt_p95,radar_phase_err_rms,radar_phase_err_h,radar_phase_err_v,"
-         "follow_swing_p99,follow_swing_max\n";
+         "follow_swing_p99,follow_swing_max,follow_entry_swing_max\n";
   for (int i = 0; i < n; ++i) {
     double wind = 0;
     const InterceptConfig cfg = monteCarloConfig(i, seed0, maneuver_level, &wind, tweak);
@@ -378,7 +383,8 @@ void runInterceptMonteCarlo(int n, std::uint64_t seed0, const std::string& csv_p
         << m.follow_pct << ',' << m.size_est << ',' << m.follow_nees << ',' << m.t_min_distance << ','
         << m.phase_min_distance << ',' << m.handover_nees << ',' << m.follow_acc_p95 << ','
         << m.follow_tilt_p95 << ',' << m.radar_phase_err_rms << ',' << m.radar_phase_err_h << ','
-        << m.radar_phase_err_v << ',' << m.follow_swing_p99 << ',' << m.follow_swing_max << '\n';
+        << m.radar_phase_err_v << ',' << m.follow_swing_p99 << ',' << m.follow_swing_max << ','
+        << m.follow_entry_swing_max << '\n';
     if ((i + 1) % 25 == 0) std::printf("  %d / %d runs\n", i + 1, n);
   }
 }

@@ -103,15 +103,15 @@ TEST(Mission, EnteringFollowDoesNotStepTheCommand) {
     MissionManager mm(ip, GuidanceParams{});
     PositionController ctl(ControlParams{}, 6.0, 14.0);
     const double dt = 0.01;
-    Vec3 p(0, 0, 40), v(0, -6, 0);  // 15 m in front of a target flying +x, moving sideways
-    const Vec3 p_t(-15, 0, 42), v_t(8, 0, 0);
+    Vec3 p(0, 0, 40), v(0, -6, 0);  // in front of a target flying +x (22 m at the lock), moving sideways
+    const Vec3 p_t(-30, 0, 42), v_t(8, 0, 0);
     Vec3 a_prev = Vec3::Zero();
     double step = 0.0;
     for (int k = 0; k < 200; ++k) {
       const bool locked = k >= 100;  // camera lock at 1 s: HANDOVER -> FOLLOW
       const auto out = mm.update({k * dt, p, v, true, locked, p_t + v_t * (k * dt), v_t, 0.6, 0.3}, dt);
       const Vec3 a = ctl.compute(p, v, out.p_des, out.v_des, dt, out.v_max, Vec3::Zero(), out.v_rel_max,
-                                 out.v_cmd_tau);
+                                 out.v_cmd_tau, out.to_target);
       if (k >= 99 && k <= 101) step = std::max(step, (a - a_prev).norm());
       a_prev = a;  // kinematics frozen: only the command's own continuity is tested
     }
@@ -119,4 +119,24 @@ TEST(Mission, EnteringFollowDoesNotStepTheCommand) {
   };
   EXPECT_GT(max_step(-1.0), 2.0);  // without: the command jumps at the switch (3 m/s^2 here)
   EXPECT_LT(max_step(0.8), 1.0);   // with: continuous
+}
+
+// Agility-scaled standoff (D39): a calm target keeps the nominal 8 m; a target that has braked at
+// 6 m/s^2 is followed further away (offline L2: near misses in FOLLOW 30 -> 1 out of 300).
+TEST(Mission, StandoffGrowsWithObservedAgility) {
+  auto standoff_after = [](double brake) {
+    MissionManager mm(InterceptParams{}, GuidanceParams{});
+    const double dt = 0.01;
+    Vec3 v_t(8, 0, 0);
+    for (int k = 0; k < 600; ++k) {
+      if (k >= 300) v_t.x() = std::max(0.0, v_t.x() - brake * dt);  // braking from t = 3 s
+      mm.update({k * dt, Vec3(-8, 0, 38), v_t, true, true, Vec3(0, 0, 40), v_t, 0.6, 0.1}, dt);
+    }
+    return mm.followDistance();
+  };
+  EXPECT_NEAR(standoff_after(0.0), 8.0, 1e-6);
+  EXPECT_NEAR(standoff_after(1.0), 8.0, 1e-6);  // below agile_ref
+  // one 1.3 s brake at 6 m/s^2, seen through the 2 s low-pass (robust to estimate noise): ~10 m
+  EXPECT_GT(standoff_after(6.0), 10.0);
+  EXPECT_LE(standoff_after(6.0), 14.0 + 1e-9);   // capped
 }

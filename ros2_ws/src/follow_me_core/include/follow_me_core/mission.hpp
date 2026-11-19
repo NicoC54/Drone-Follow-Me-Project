@@ -77,6 +77,31 @@ struct InterceptParams {
   double bumpless_tau = 0.8;          // [s] (< 0: off)
   double bumpless_time = 2.0;         // [s]
   double bumpless_close_speed = 4.0;  // [m/s]
+  double bumpless_min_excess = 4.0;   // [m] only when entering FOLLOW further than standoff + this
+  // Rear rejoin (2026-11-19, journal 27): a follower that is not yet behind the target aims at a
+  // rejoin point rejoin_back behind it and rejoin_side to the side it is already on (it goes
+  // AROUND the target instead of meeting it head-on), may circle the target inside the hand-over
+  // hold range (only the closing component is removed), and enters FOLLOW once behind the target
+  // (or follow_entry_timeout after the camera lock). Before: the follower met the target head-on
+  // and turned around at full authority on entering FOLLOW.
+  bool rejoin = false;  // measured: smoother entry, but more near misses in the hand-over (journal 30)
+  double rejoin_back = 25.0;           // [m]
+  double rejoin_side = 20.0;           // [m] (>= the hand-over hold range: pass the target clear)
+  double follow_entry_timeout = 15.0;  // [s] after the camera lock
+  double rejoin_min_speed = 4.0;       // [m/s] target horizontal speed below which there is no rejoin
+  // Agility-scaled standoff (D39, 2026-11-19): follow distance = follow_dist + agile_gain x (observed
+  // agility - agile_ref), capped at agile_max_dist. Observed agility = horizontal acceleration of the
+  // target's estimated velocity (low-pass agile_tau), held as a decaying maximum (agile_memory):
+  // a target that has shown it brakes hard stays "agile" for a while. Before: the 8 m standoff was
+  // as short as an aggressive target's stopping distance (offline L2: 30 near misses in FOLLOW).
+  double agile_gain = 2.0;        // [m per m/s^2] (< 0: off)
+  double agile_ref = 1.5;         // [m/s^2] agility below which the standoff stays nominal
+  double agile_max_dist = 14.0;   // [m]
+  // 2 s, not 0.5 s: in Gazebo the camera-based velocity estimate is noisier; differentiated with a
+  // 0.5 s low-pass it read 6.6 m/s^2 behind a 3.6 m/s^2 target, the follower backed off to 14 m,
+  // the estimate got noisier at that range and the agility grew further (self-sustaining loop).
+  double agile_tau = 2.0;         // [s]
+  double agile_memory = 20.0;     // [s]
 };
 
 enum class MissionPhase : std::uint8_t { Wait = 0, Midcourse = 1, Handover = 2, Follow = 3, Lost = 4 };
@@ -93,6 +118,9 @@ Rendezvous predictedIntercept(const Vec3& p_f, const Vec3& p_t, const Vec3& v_t,
 
 // Standoff offset seen from the target: behind it (along -v) or, if slow, where we already are.
 Vec3 standoffOffset(const Vec3& p_f, const Vec3& p_t, const Vec3& v_t, const GuidanceParams& g);
+// Along-track position of the follower relative to the target (< 0: behind it) [m], and its
+// lateral position (> 0: on the target's left) [m]; NaN when the target is too slow for a heading.
+Vec2 trackCoordinates(const Vec3& p_f, const Vec3& p_t, const Vec3& v_t, double v_heading_min);
 
 class MissionManager {
  public:
@@ -121,6 +149,7 @@ class MissionManager {
     double jerk_max = -1.0;     // nominal jerk limit for this phase (< 0: none)
     double v_rel_max = -1.0;    // limit of the position correction kp (p_des - p) [m/s] (< 0: none)
     double v_cmd_tau = -1.0;    // bumpless transfer: smoothing of the velocity command [s] (< 0: none)
+    Vec3 to_target = Vec3::Zero();  // unit vector towards the target (bumpless: never delay braking)
   };
   Output update(const Input& in, double dt);
   Output setpoint(const Input& in, double dt);  // the phase's guidance (update = transitions + this)
@@ -133,6 +162,15 @@ class MissionManager {
   MissionPhase phase_ = MissionPhase::Wait;
   double t_lock_ok_ = -1e9;
   MissionPhase last_phase_ = MissionPhase::Wait;
+  double rejoin_sign_ = 0.0;      // side of the target the rejoin goes around (+1 left, -1 right)
+  double t_lock_first_ = -1.0;    // first camera lock of the current hand-over
+  std::optional<Vec3> v_t_filt_;  // low-passed target velocity (agility)
+  double agility_ = 0.0;          // observed agility [m/s^2] (decaying maximum)
+  bool bumpless_entry_ = false;   // this FOLLOW entry is smoothed
+ public:
+  double agility() const { return agility_; }
+  double followDistance() const;
+ private:
   double t_phase_change_ = -1e9;
   std::optional<Vec3> hold_;
   std::optional<Vec3> v_cmd_;  // filtered velocity command (MIDCOURSE / HANDOVER)

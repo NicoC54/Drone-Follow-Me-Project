@@ -6,12 +6,20 @@ namespace follow_me {
 
 Vec3 PositionController::compute(const Vec3& p, const Vec3& v, const Vec3& p_des,
                                  const Vec3& v_des, double dt, double v_max_override, const Vec3& a_ff,
-                                 double v_rel_max, double v_cmd_tau) {
+                                 double v_rel_max, double v_cmd_tau, const Vec3& to_target) {
   const double v_max = v_max_override > 0.0 ? std::min(v_max_override, v_max_) : v_max_;
   Vec3 correction = p_.kp_pos * (p_des - p);
   if (v_rel_max > 0.0) correction = saturate(correction, v_rel_max);
   Vec3 v_cmd = saturate(v_des + correction, v_max);
-  if (v_cmd_tau > 0.0 && v_cmd_prev_) v_cmd = *v_cmd_prev_ + dt / (v_cmd_tau + dt) * (v_cmd - *v_cmd_prev_);
+  if (v_cmd_tau > 0.0 && v_cmd_prev_) {
+    const Vec3 raw = v_cmd;
+    v_cmd = *v_cmd_prev_ + dt / (v_cmd_tau + dt) * (v_cmd - *v_cmd_prev_);
+    // Offline scripted run 278 (default seed): entering FOLLOW at 8.3 m while the target turned
+    // towards the follower, the smoothing kept the old closing speed for ~1 s, the safety filter
+    // braked alone and too late: 2.64 m. A slower closing speed is never smoothed.
+    const double closing_raw = raw.dot(to_target), closing = v_cmd.dot(to_target);
+    if (closing_raw < closing) v_cmd += (closing_raw - closing) * to_target;
+  }
   v_cmd_prev_ = v_cmd;
   const Vec3 e_v = v_cmd - v;
   integral_ = saturate(integral_ + p_.ki * e_v * dt, p_.i_max);  // clamped: anti-windup
