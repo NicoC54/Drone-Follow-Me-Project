@@ -89,8 +89,9 @@ def spawn_radars(context, common):
 TARGET_START = (330.0, 260.0, 40.0)
 TARGET_HEADING_DEG = 200.0          # scripted flight plan: nearly head-on
 HEADING_TO_FOLLOWER_DEG = 218.0     # bearing from the target start to the follower start
-HEADING_SPREAD_DEG = 100.0          # random flight: head-on, crossing or partly fleeing (not
-                                    # fully fleeing: 2 m/s of speed margin, > 120 s to catch up)
+HEADING_OFF_DEG = (35.0, 100.0)     # random flight: ALWAYS oblique, 35-100 deg off head-on on either
+                                    # side (head-on excluded: it forces a turn-around, journal 27;
+                                    # fully fleeing excluded: 2 m/s of speed margin, > 120 s to catch up)
 
 
 def spawn_target(context, common):
@@ -105,7 +106,9 @@ def spawn_target(context, common):
     level = int(LaunchConfiguration("target_maneuvers").perform(context)) if path == "random" else 0
     heading = TARGET_HEADING_DEG
     if level > 0:
-        heading = (HEADING_TO_FOLLOWER_DEG + random.Random(seed).uniform(-1, 1) * HEADING_SPREAD_DEG) % 360.0
+        rng = random.Random(seed)
+        off = rng.uniform(*HEADING_OFF_DEG) * rng.choice((-1.0, 1.0))
+        heading = (HEADING_TO_FOLLOWER_DEG + off) % 360.0
     sdf = target_models.target_sdf(kind, scale, physics)
     x, y, z = TARGET_START
     return [
@@ -127,7 +130,7 @@ def generate_launch_description():
     pkg_ros = get_package_share_directory("follow_me_ros")
     world = os.path.join(pkg_gz, "worlds", "intercept.sdf")
     bridge_cfg = os.path.join(pkg_gz, "config", "bridge.yaml")
-    rviz_cfg = os.path.join(pkg_gz, "rviz", "follow_me.rviz")
+    rviz_cfg = LaunchConfiguration("rviz_config")
     params = os.path.join(pkg_ros, "config", "follow_me.yaml")
     params_intercept = os.path.join(pkg_ros, "config", "intercept.yaml")  # phase-4 overrides
 
@@ -175,6 +178,8 @@ def generate_launch_description():
     return LaunchDescription([
         plugin_path,
         DeclareLaunchArgument("gui", default_value="true", description="Gazebo GUI"),
+        DeclareLaunchArgument("rviz_config", default_value=os.path.join(pkg_gz, "rviz", "follow_me.rviz"),
+                              description="RViz configuration (record_grid.py: a zoomed-out copy)"),
         DeclareLaunchArgument("rviz", default_value="true", description="Start RViz2"),
         DeclareLaunchArgument("target", default_value="random", description="Target drone: quad_x, hexa, octo or random"),
         DeclareLaunchArgument("target_scale", default_value="random", description="Target scale (1.0 = 1.1 m quad) or random (0.6-1.8)"),

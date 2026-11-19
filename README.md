@@ -7,16 +7,16 @@ A ground radar picks up an **unknown drone** 480 m away. A quadrotor flies to th
 intercept point, hands over to its own camera, **learns the target's size in flight**, then follows
 it at a safe distance. Everything between the sensors and the motors is written here, in C++.
 
-![Gazebo: radar track only, then camera hand-over, then follow](docs/media/demo.gif)
+Two Gazebo flights, each shown as four synchronised views of the same instant (x4): chase camera,
+onboard camera with HUD, RViz (target **estimate** and its 3σ ellipsoid, aim point, camera field
+of view) and the top view of the whole engagement.
 
-*Gazebo, 15 s: chase camera (left), onboard camera with HUD (right). Mid-course on the radar
-track, hand-over to the camera while learning the target's size, then follow at 8 m.
-**▶ [Full 1-minute video](docs/media/demo.mp4)**.*
+![Situation 1: small quadrotor, oblique approach, moderate manoeuvres, three radars](docs/media/demo1.gif)
 
-| Top view of the whole engagement | RViz: what the algorithms see |
-|---|---|
-| ![Radar-cued interception then camera follow](docs/media/intercept.gif) | ![RViz during the hand-over](docs/media/rviz.gif) |
-| Follower (blue) flies to the predicted intercept point, then settles 8 m behind the target (red). | Target **estimate** and its 3σ ellipsoid (orange: radar only, green: radar + camera), aim point, camera field of view, true distance (green → red near 4 m). |
+![Situation 2: octocopter twice as large, aggressive manoeuvres, three radars](docs/media/demo2.gif)
+
+*Random flight plans (`target_path:=random`, seeds 54 and 107), three ground radars: the follower
+never knows the target's shape, size or route. Minimum distance 6.9 m and 5.2 m. **▶ [1-minute video](docs/media/demo.mp4)**.*
 
 **[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
 **[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·

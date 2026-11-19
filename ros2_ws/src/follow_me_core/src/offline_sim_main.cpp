@@ -82,7 +82,8 @@ int main(int argc, char** argv) {
                                   "fusion.q_accel", "intercept.a_ff_gain", "intercept.follow_a_max",
                                   "intercept.follow_jerk_max", "intercept.transition_jerk",
                                   "intercept.transition_time", "intercept.follow_close_speed",
-                                  "intercept.bumpless_tau", "intercept.bumpless_time", "intercept.bumpless_close_speed", "radar.count", "radar.third"};
+                                  "intercept.bumpless_tau", "intercept.bumpless_time", "intercept.bumpless_close_speed",
+                                  "target.maneuver_seed", "target.heading", "radar.count", "radar.third"};
     if (std::none_of(std::begin(known), std::end(known), [&](const char* k) { return kv.first == k; })) {
       std::fprintf(stderr, "unknown --set key %s\n", kv.first.c_str());
       return 1;
@@ -108,6 +109,9 @@ int main(int argc, char** argv) {
       else if (k == "intercept.bumpless_tau") c.intercept.bumpless_tau = std::stod(v);
       else if (k == "intercept.bumpless_time") c.intercept.bumpless_time = std::stod(v);
       else if (k == "intercept.bumpless_close_speed") c.intercept.bumpless_close_speed = std::stod(v);
+      // Same target as a Gazebo run with target_path:=random target_seed:=N (heading drawn by the launch)
+      else if (k == "target.maneuver_seed") c.maneuver_seed = std::stoull(v);
+      else if (k == "target.heading") c.base.leader.start_heading_deg = std::stod(v);
       else if (k == "radar.count") {  // 2: second radar at (450, -100, 3), same draws as the first
         c.extra_radars.clear();
         if (std::stoi(v) >= 2) c.extra_radars.push_back(follow_me::InterceptConfig::secondRadarSite(c.radar));

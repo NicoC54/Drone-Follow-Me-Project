@@ -70,6 +70,11 @@ tools/record_video.py docs/media/demo.mp4      # chase camera + onboard HUD, H.2
 RViz screenshots and GIF, in a virtual display (nothing opens on screen; `sudo apt install xvfb`):
 ```bash
 tools/capture_rviz.py docs/media     # rviz_handover.png, rviz_follow.png, rviz.gif (~2.5 min)
+# README GIFs: one flight, 4 synchronised views (~2 min each)
+tools/record_grid.py record out/demo1 target:=quad_x target_scale:=0.8 target_path:=random target_seed:=54 radars:=3
+tools/record_grid.py record out/demo2 target:=octo target_scale:=1.5 target_path:=random target_maneuvers:=2 target_seed:=107 radars:=3
+tools/record_grid.py compose out/demo1 docs/media/demo1.gif --title "Situation 1/2: ..." --start 22 --end 65.5 --fps 20 --tile 480x270 --colors 80
+tools/record_grid.py compose out/demo2 docs/media/demo2.gif --title "Situation 2/2: ..." --start 17 --end 53 --fps 20 --tile 480x270 --colors 80
 ```
 
 - RViz shows the algorithms: predicted intercept point, approach line, predicted target path,

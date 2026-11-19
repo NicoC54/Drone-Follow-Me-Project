@@ -396,8 +396,9 @@ there is no rendezvous (approach 4 m/s < target 8 m/s) and the follower slides t
 
 ### D48. Random target flights in Gazebo
 `target_path:=random` (`target_maneuvers:=1|2`): the leader node flies `randomScenario` (the
-offline Monte-Carlo generator) from a start heading drawn within +-100 deg of the bearing to the
-follower (head-on to crossing; fully fleeing excluded: 2 m/s speed margin). One `target_seed`
+offline Monte-Carlo generator) from an OBLIQUE start heading, 35-100 deg off head-on on either
+side (head-on forces the turn-around of D47: aggressive seeds succeeding with a 5 m margin 11 -> 28
+out of 200; fully fleeing excluded: 2 m/s speed margin). One `target_seed`
 draws shape, size, flight plan and heading. Default stays `scripted` (reference flight, documented
 numbers). The offline Monte-Carlo does not draw the start heading yet.
 
