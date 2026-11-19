@@ -56,6 +56,7 @@ class HudNode : public rclcpp::Node {
   HudNode() : Node("hud_node") {
     d_min_ = declare_parameter("hud.d_min", 4.0);
     standoff_ = declare_parameter("hud.standoff", 8.25);
+    upscale_ = declare_parameter("hud.upscale", 2);
     sub_est_ = create_subscription<TargetEstimate>("/target/estimate", 1, [this](const TargetEstimate& m) { est_ = m; });
     sub_phase_ = create_subscription<std_msgs::msg::String>(
         "/mission/phase", 1, [this](const std_msgs::msg::String& m) { phase_ = m.data; });
@@ -77,6 +78,9 @@ class HudNode : public rclcpp::Node {
       RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, "cv_bridge: %s", e.what());
       return;
     }
+    // Drawn at 2x resolution: the HUD is often shown small (RViz image panel ~330 px wide), where
+    // text drawn at 640 px became unreadable; a 1280 px image downscales into crisp text.
+    if (upscale_ > 1) cv::resize(cv->image, cv->image, cv::Size(), upscale_, upscale_, cv::INTER_LINEAR);
     cv::Mat& img = cv->image;
     const double k = img.cols / 640.0;  // scale the layout with the resolution
     const int W = img.cols, H = img.rows;
@@ -90,51 +94,57 @@ class HudNode : public rclcpp::Node {
       range = std::hypot(est_->position.x - p.x, est_->position.y - p.y, est_->position.z - p.z);
     }
 
-    // ---- top band: phase | range | track source | learnt size ----
-    const int top = static_cast<int>(30 * k);
-    band(img, {0, 0, W, top});
+    // ---- top band, two lines in large type (readable in a small panel) ----
+    //   PHASE                          SOURCE
+    //   range 8.2 m                    size 1.48 +/- 0.09 m
+    const int top = static_cast<int>(52 * k);
+    band(img, {0, 0, W, top}, 0.6);
+    const int bold = std::max(2, int(1.6 * k + 0.5)), thin = std::max(1, int(1.1 * k + 0.5));
     const std::string phase = phase_.empty() ? (tracked ? "FOLLOW-ME" : "SEARCH") : phase_;
     const cv::Scalar pc = phase_.empty() ? (tracked ? kGreen : kGrey) : phaseColor(phase_);
-    cv::rectangle(img, cv::Rect(int(8 * k), int(8 * k), int(14 * k), int(14 * k)), pc, cv::FILLED);
-    text(img, phase, {int(28 * k), int(20 * k)}, 0.5 * k, kInk, std::max(1, int(k + 0.5)));
-    char buf[96];
-    std::snprintf(buf, sizeof(buf), range >= 0 ? "range %.1f m" : "range --", range);
-    text(img, buf, {int(170 * k), int(20 * k)}, 0.45 * k, kInk);
+    cv::rectangle(img, cv::Rect(int(8 * k), int(7 * k), int(16 * k), int(16 * k)), pc, cv::FILLED);
+    text(img, phase, {int(30 * k), int(22 * k)}, 0.68 * k, pc, bold);
     // Phase 4 (mission running): radar alone, then radar + camera. Phases 2-3: camera only.
-    const std::string src = !tracked ? "no track"
+    const std::string src = !tracked ? "NO TRACK"
                             : phase_.empty() ? "CAMERA"
                             : (locked ? "RADAR + CAMERA" : "RADAR ONLY");
-    text(img, src, {int(310 * k), int(20 * k)}, 0.45 * k,
-         (locked || (tracked && phase_.empty())) ? kGreen : (tracked ? kAmber : kMuted));
+    const cv::Scalar src_col = (locked || (tracked && phase_.empty())) ? kGreen : (tracked ? kAmber : kMuted);
+    int base = 0;
+    const cv::Size ts = cv::getTextSize(src, cv::FONT_HERSHEY_SIMPLEX, 0.6 * k, bold, &base);
+    text(img, src, {W - ts.width - int(10 * k), int(22 * k)}, 0.6 * k, src_col, bold);
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), range >= 0 ? "range %.1f m" : "range --", range);
+    text(img, buf, {int(10 * k), int(45 * k)}, 0.58 * k, kInk, thin);
     if (fresh && est_->target_size > 0 && est_->target_size_sigma < 0.25)
-      std::snprintf(buf, sizeof(buf), "W %.2f +/- %.2f m", est_->target_size, 2 * est_->target_size_sigma);
+      std::snprintf(buf, sizeof(buf), "size %.2f +/- %.2f m", est_->target_size, 2 * est_->target_size_sigma);
     else if (phase_.empty())
       std::snprintf(buf, sizeof(buf), "beacon size known");
     else
-      std::snprintf(buf, sizeof(buf), "W unknown");
-    text(img, buf, {int(470 * k), int(20 * k)}, 0.45 * k, kInk);
+      std::snprintf(buf, sizeof(buf), "size unknown");
+    const cv::Size ss = cv::getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.58 * k, thin, &base);
+    text(img, buf, {W - ss.width - int(10 * k), int(45 * k)}, 0.58 * k, kInk, thin);
 
     // ---- boresight reticle (gimbal axis) ----
     const cv::Point c(W / 2, H / 2);
     cornerBrackets(img, c, int(26 * k), int(9 * k), locked ? kGreen : kInk);
     cv::line(img, {c.x - int(5 * k), c.y}, {c.x + int(5 * k), c.y}, kInk, 1, cv::LINE_AA);
     cv::line(img, {c.x, c.y - int(5 * k)}, {c.x, c.y + int(5 * k)}, kInk, 1, cv::LINE_AA);
-    if (locked) text(img, "LOCK", {c.x + int(30 * k), c.y - int(30 * k)}, 0.45 * k, kGreen, std::max(1, int(k + 0.5)));
+    if (locked) text(img, "LOCK", {c.x + int(32 * k), c.y - int(30 * k)}, 0.6 * k, kGreen, std::max(2, int(1.6 * k + 0.5)));
 
     // ---- bottom: range ladder on a log scale, with the safety minimum and the standoff ----
-    const int bh = static_cast<int>(26 * k), y0 = H - bh;
+    const int bh = static_cast<int>(30 * k), y0 = H - bh;
     band(img, {0, y0, W, bh});
     const int x0 = int(70 * k), x1 = W - int(16 * k), ym = y0 + bh / 2;
     auto xr = [&](double r) {
       const double u = std::clamp((std::log10(std::max(r, 1.0)) - 0.0) / 3.0, 0.0, 1.0);  // 1 m .. 1 km
       return int(x0 + u * (x1 - x0));
     };
-    text(img, "range", {int(8 * k), ym + int(5 * k)}, 0.4 * k, kMuted);
+    text(img, "range", {int(8 * k), ym + int(5 * k)}, 0.5 * k, kMuted, std::max(1, int(k + 0.5)));
     cv::line(img, {x0, ym}, {x1, ym}, kMuted, 1, cv::LINE_AA);
     for (double r : {1.0, 10.0, 100.0, 1000.0}) {
       cv::line(img, {xr(r), ym - int(3 * k)}, {xr(r), ym + int(3 * k)}, kMuted, 1);
       std::snprintf(buf, sizeof(buf), r < 1000 ? "%.0f" : "1k", r);
-      text(img, buf, {xr(r) - int(4 * k), ym + int(12 * k)}, 0.3 * k, kMuted);
+      text(img, buf, {xr(r) - int(5 * k), ym + int(13 * k)}, 0.4 * k, kMuted, std::max(1, int(k + 0.5)));
     }
     cv::rectangle(img, cv::Point(x0, ym - int(4 * k)), cv::Point(xr(d_min_), ym + int(4 * k)), kRed, cv::FILLED);
     cv::line(img, {xr(standoff_), ym - int(7 * k)}, {xr(standoff_), ym + int(7 * k)}, kGreen, 2);
@@ -147,6 +157,7 @@ class HudNode : public rclcpp::Node {
   }
 
   double d_min_, standoff_;
+  int upscale_;
   std::optional<TargetEstimate> est_;
   std::optional<nav_msgs::msg::Odometry> odom_;
   std::string phase_;

@@ -177,11 +177,29 @@ class MonitorNode : public rclcpp::Node {
     // Link between the drones: green near the setpoint, red close to d_min.
     const double k = std::clamp((dist - d_min_) / (d_ref_ - d_min_), 0.0, 1.0);
     arr.markers.push_back(line("link", {leader_->p, follower_->p}, 1.0f - k, k, 0.1f));
+    Marker dtxt;  // true distance written on the link
+    dtxt.header = h;
+    dtxt.ns = "link_distance";
+    dtxt.type = Marker::TEXT_VIEW_FACING;
+    const Vec3 mid = 0.5 * (leader_->p + follower_->p) + Vec3(0, 0, 0.6);
+    dtxt.pose.position.x = mid.x();
+    dtxt.pose.position.y = mid.y();
+    dtxt.pose.position.z = mid.z();
+    dtxt.pose.orientation.w = 1.0;
+    dtxt.scale.z = 0.7;
+    dtxt.color.r = 1.0f - static_cast<float>(k);
+    dtxt.color.g = static_cast<float>(k);
+    dtxt.color.b = 0.1f;
+    dtxt.color.a = 1.0f;
+    char dbuf[32];
+    std::snprintf(dbuf, sizeof(dbuf), "%.1f m", dist);
+    dtxt.text = dbuf;
+    arr.markers.push_back(dtxt);
     // Drones drawn IN their TF frame (bridged from Gazebo), frame-locked: they move with every TF
     // update, tilt and turn with the drone. A light X-frame silhouette at the real Gazebo size
     // (two arms + four translucent rotor discs) instead of an opaque box hiding the TF axes.
     auto drone = [&](const std::string& ns, const std::string& frame, double rotor_xy, float r, float g,
-                     float b) {
+                     float b, const std::string& label, double label_z) {
       Marker base;
       base.header.frame_id = frame;
       base.header.stamp = rclcpp::Time(0);  // latest available transform
@@ -218,9 +236,24 @@ class MonitorNode : public rclcpp::Node {
           rotor.color.a = 0.45f;
           arr.markers.push_back(rotor);
         }
+      // A translucent halo (the real drone is ~1 m wide, a few pixels in a wide view) + a label.
+      Marker halo = base;
+      halo.id = 10;
+      halo.type = Marker::SPHERE;
+      halo.scale.x = halo.scale.y = halo.scale.z = 1.8;
+      halo.color.a = 0.12f;
+      arr.markers.push_back(halo);
+      Marker txt = base;
+      txt.id = 11;
+      txt.type = Marker::TEXT_VIEW_FACING;
+      txt.pose.position.z = label_z;
+      txt.scale.z = 0.6;
+      txt.color.a = 1.0f;
+      txt.text = label;
+      arr.markers.push_back(txt);
     };
-    drone("leader_truth", "leader", 0.42, 0.9f, 0.1f, 0.1f);           // = leader model in the SDF
-    drone("follower", "follower_truth", 0.37, 0.1f, 0.3f, 0.9f);       // = follower model in the SDF
+    drone("leader_truth", "leader", 0.42, 0.9f, 0.15f, 0.15f, "TARGET (truth)", -1.2);  // label below
+    drone("follower", "follower_truth", 0.37, 0.25f, 0.55f, 1.0f, "FOLLOWER", 1.1);    // label above
     pub_mk_->publish(arr);
   }
 

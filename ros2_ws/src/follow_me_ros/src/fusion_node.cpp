@@ -66,6 +66,7 @@ class FusionNode : public rclcpp::Node {
     Vec3 pos;
     Mat3 R_cw;
     follow_me_ros::OdomState odom;
+    follow_me_ros::GimbalState gimbal;
   };
   // Camera pose at time t: odometry and gimbal histories, each interpolated at t.
   std::optional<CameraPose> cameraPoseAt(double t) const {
@@ -83,7 +84,7 @@ class FusionNode : public rclcpp::Node {
     });
     if (!odom || !gimbal) return std::nullopt;
     return CameraPose{follow_me_ros::cameraPosition(*odom, cam_offset_),
-                      follow_me_ros::cameraRotation(*odom, *gimbal), *odom};
+                      follow_me_ros::cameraRotation(*odom, *gimbal), *odom, *gimbal};
   }
 
   void onDetection(const follow_me_msgs::msg::Detection& m) {
@@ -115,6 +116,7 @@ class FusionNode : public rclcpp::Node {
     follow_me::FusionTracker::RadarObs obs;
     obs.own_pos = odom->p;  // where WE were at the scan time: to recognise our own echo
     obs.own_P = odom->P_pos + 0.01 * Mat3::Identity();
+    obs.site = Vec3(m.site.x, m.site.y, m.site.z);  // several radars: the site of THIS scan
     for (const auto& p : m.plots) obs.plots.push_back({p.range, p.azimuth, p.elevation, p.range_rate});
     const auto before = tracker_.status();
     tracker_.onRadar(t, obs);
@@ -201,14 +203,18 @@ class FusionNode : public rclcpp::Node {
     Marker txt = ell;
     txt.ns = "status";
     txt.type = Marker::TEXT_VIEW_FACING;
-    txt.pose.position.z += 2.0;
+    txt.pose.position.z += 2.3;
     txt.pose.orientation = geometry_msgs::msg::Quaternion();
     txt.scale.x = txt.scale.y = 0;
-    txt.scale.z = 0.6;
-    txt.color.r = txt.color.g = txt.color.b = txt.color.a = 1.0f;
+    txt.scale.z = 0.65;
+    txt.color = ell.color;  // green when the camera is locked, orange on radar only
+    txt.color.a = 1.0f;
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "%s %s  W=%.2fm", follow_me::toString(tracker_.status()),
-                  locked ? "CAM LOCK" : "RADAR", tracker_.sizeEstimate());
+    if (tracker_.sizeSigma() < 0.25)
+      std::snprintf(buf, sizeof(buf), "ESTIMATE %s\nsize %.2f+/-%.2f m", locked ? "radar+camera" : "radar-only",
+                    tracker_.sizeEstimate(), 2.0 * tracker_.sizeSigma());
+    else
+      std::snprintf(buf, sizeof(buf), "ESTIMATE %s\nsize unknown", locked ? "radar+camera" : "radar-only");
     txt.text = buf;
     arr.markers.push_back(txt);
     if (const auto pose = cameraPoseAt(rclcpp::Time(h.stamp).seconds() - 0.01))
@@ -218,25 +224,36 @@ class FusionNode : public rclcpp::Node {
 
   // Camera field of view: a pyramid from the camera centre to the image corners, cut at the
   // target range (what the detector can see; the ROI is the small window inside it).
+  // Camera field of view: a pyramid from the camera centre to the image corners, cut at the
+  // target range. Drawn in the follower's TF frame (frame-locked): it moves with the drone at the
+  // display rate. (Drawn in the world frame at 20 Hz from the navigation pose, it lagged the
+  // smoothly moving drone by up to 0.6 m at 12 m/s, then jumped: it looked like it was shaking.)
+  // Only the gimbal angles are taken from here; the body attitude comes from the TF.
   Marker frustumMarker(const std_msgs::msg::Header& h, const CameraPose& pose, double range, bool locked) const {
     Marker m;
-    m.header = h;
+    m.header.frame_id = "follower_truth";
+    m.header.stamp = rclcpp::Time(0);  // latest transform
+    m.frame_locked = true;
     m.ns = "camera_fov";
     m.type = Marker::LINE_LIST;
     m.pose.orientation.w = 1.0;
-    m.scale.x = 0.05;
-    m.color = locked ? follow_me_ros::rgba(0.11f, 0.69f, 0.48f, 0.9f) : follow_me_ros::rgba(0.93f, 0.63f, 0.0f, 0.9f);
+    m.scale.x = 0.03;
+    m.color = locked ? follow_me_ros::rgba(0.11f, 0.69f, 0.48f, 0.5f) : follow_me_ros::rgba(0.93f, 0.63f, 0.0f, 0.5f);
+    (void)h;
     const double d = std::clamp(range, 3.0, 60.0);
-    const Mat3 R_wc = pose.R_cw.transpose();
+    // Body -> camera link: yaw about z, then pitch about -y (positive = looks up), as in cameraRotation.
+    const Mat3 R_bl = (Eigen::AngleAxisd(pose.gimbal.yaw, Vec3::UnitZ()) *
+                       Eigen::AngleAxisd(pose.gimbal.pitch, -Vec3::UnitY())).toRotationMatrix();
     Vec3 c[4];
     const double us[4] = {0, double(cam_prm_.width), double(cam_prm_.width), 0};
     const double vs[4] = {0, 0, double(cam_prm_.height), double(cam_prm_.height)};
     for (int k = 0; k < 4; ++k) {
-      const Vec3 rc((us[k] - 0.5 * cam_prm_.width) / cam_prm_.fx * d, (vs[k] - 0.5 * cam_prm_.height) / cam_prm_.fy * d, d);
-      c[k] = pose.pos + R_wc * rc;
+      const double x = (us[k] - 0.5 * cam_prm_.width) / cam_prm_.fx, y = (vs[k] - 0.5 * cam_prm_.height) / cam_prm_.fy;
+      const Vec3 dir_link(1.0, -x, -y);  // camera (right, down, forward) -> link (forward, left, up)
+      c[k] = cam_offset_ + d * (R_bl * dir_link);
     }
     for (int k = 0; k < 4; ++k) {
-      m.points.push_back(follow_me_ros::toPoint(pose.pos));
+      m.points.push_back(follow_me_ros::toPoint(cam_offset_));
       m.points.push_back(follow_me_ros::toPoint(c[k]));
       m.points.push_back(follow_me_ros::toPoint(c[k]));
       m.points.push_back(follow_me_ros::toPoint(c[(k + 1) % 4]));
