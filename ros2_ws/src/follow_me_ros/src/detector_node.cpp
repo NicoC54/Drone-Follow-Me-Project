@@ -36,6 +36,9 @@ class DetectorNode : public rclcpp::Node {
     mode_ = declare_parameter("mode", std::string("color"));
     dark_ratio_ = declare_parameter("silhouette.dark_ratio", 0.65);  // darker than 65 % of the sky
     roi_timeout_ = declare_parameter("silhouette.roi_timeout", 0.5);
+    size_mode_ = declare_parameter("silhouette.size_mode", std::string("bbox"));  // bbox | moment
+    // Raw detection text on the debug image (u, v, size). Off by default: hud_node shows it better.
+    debug_text_ = declare_parameter("debug_text", false);
     sub_roi_ = create_subscription<follow_me_msgs::msg::Roi>(
         "/follower/detector/roi", 5, [this](const follow_me_msgs::msg::Roi& r) { roi_ = r; });
 
@@ -171,6 +174,24 @@ class DetectorNode : public rclcpp::Node {
     det.u = r.x + x + w / 2.0;  // pixel i spans [i, i+1): the box centre is already continuous
     det.v = r.y + y + hh / 2.0;
     det.size = std::max(w, hh);
+    if (size_mode_ == "moment") {
+      // Yaw-invariant size: for 4 rotors on a circle of radius r, 90 deg apart, the sum of their
+      // squared horizontal offsets is 2 r^2 whatever the yaw, whereas the bounding-box width of an
+      // X shape varies by ~30 % (narrow from behind, wide along a diagonal). Gazebo phase 4: the
+      // apparent size followed the target's relative yaw (+17 % at 32 deg), a SLOW error that
+      // biased the range by 1-2 m. Size = 4 x horizontal standard deviation of the blob pixels.
+      double sw = 0, sx = 0, sxx = 0;
+      for (int yy = y; yy < y + hh; ++yy)
+        for (int xx = x; xx < x + w; ++xx) {
+          const int lab = labels.at<int>(yy, xx);
+          if (lab > 0 && used[lab]) {
+            sw += 1;
+            sx += xx;
+            sxx += double(xx) * xx;
+          }
+        }
+      if (sw > 0) det.size = 4.0 * std::sqrt(std::max(sxx / sw - (sx / sw) * (sx / sw), 0.0) + 1.0 / 12.0);
+    }
     const bool on_image_border = r.x + x <= 1 || r.y + y <= 1 || r.x + x + w >= rgb.cols - 1 ||
                                  r.y + y + hh >= rgb.rows - 1;
     det.size_valid = !on_image_border;
@@ -208,9 +229,9 @@ class DetectorNode : public rclcpp::Node {
         std::snprintf(txt, sizeof(txt), "%s u=%.0f v=%.0f s=%.1fpx%s",
                       det.injected_outlier ? "OUTLIER" : "det", det.u, det.v, det.size,
                       det.size_valid ? "" : " TRUNCATED (bearing only)");
-        cv::putText(dbg, txt, {8, text_y}, cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
+        if (debug_text_) cv::putText(dbg, txt, {8, text_y}, cv::FONT_HERSHEY_SIMPLEX, 0.5, col, 1);
       } else {
-        cv::putText(dbg, "no detection", {8, text_y}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 0}, 1);
+        if (debug_text_) cv::putText(dbg, "no detection", {8, text_y}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 0}, 1);
       }
       cv::drawMarker(dbg, {rgb.cols / 2, rgb.rows / 2}, {255, 255, 255}, cv::MARKER_CROSS, 12, 1);
       pub_dbg_->publish(*cv_bridge::CvImage(msg->header, "rgb8", dbg).toImageMsg());
@@ -230,7 +251,8 @@ class DetectorNode : public rclcpp::Node {
   std::deque<follow_me_msgs::msg::Detection> delayed_;
   rclcpp::TimerBase::SharedPtr release_timer_;
   double p_miss_, p_outlier_, size_bias_px_, fill_min_, dark_ratio_, roi_timeout_;
-  std::string mode_;
+  std::string mode_, size_mode_;
+  bool debug_text_ = false;
   std::optional<follow_me_msgs::msg::Roi> roi_;
   rclcpp::Subscription<follow_me_msgs::msg::Roi>::SharedPtr sub_roi_;
   int min_pixels_, sat_min_, val_min_, hue_max_, latency_ms_;

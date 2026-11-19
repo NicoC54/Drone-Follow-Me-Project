@@ -25,3 +25,4 @@
       blind_hold_range: 25.0
     silhouette:
       dark_ratio: 0.65
+      size_mode: moment          # yaw-invariant apparent size (see detector_node)
