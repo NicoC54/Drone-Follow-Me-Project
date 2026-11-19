@@ -192,6 +192,8 @@ inline follow_me::FusionParams declareFusion(rclcpp::Node& n) {
   f.size_prior_sigma = n.declare_parameter("fusion.size_prior_sigma", f.size_prior_sigma);
   f.size_max = n.declare_parameter("fusion.size_max", f.size_max);
   f.detectable_px = n.declare_parameter("fusion.detectable_px", f.detectable_px);
+  f.size_rel_noise = n.declare_parameter("fusion.size_rel_noise", f.size_rel_noise);
+  f.size_aspect_tau = n.declare_parameter("fusion.size_aspect_tau", f.size_aspect_tau);
   return f;
 }
 
@@ -206,6 +208,12 @@ inline follow_me::InterceptParams declareIntercept(rclcpp::Node& n) {
   i.camera_fx = n.has_parameter("camera.fx") ? n.get_parameter("camera.fx").as_double()
                                              : n.declare_parameter("camera.fx", i.camera_fx);
   i.lock_lost_time = n.declare_parameter("intercept.lock_lost_time", i.lock_lost_time);
+  i.transition_jerk = n.declare_parameter("intercept.transition_jerk", i.transition_jerk);
+  i.transition_time = n.declare_parameter("intercept.transition_time", i.transition_time);
+  i.follow_close_speed = n.declare_parameter("intercept.follow_close_speed", i.follow_close_speed);
+  i.bumpless_tau = n.declare_parameter("intercept.bumpless_tau", i.bumpless_tau);
+  i.bumpless_time = n.declare_parameter("intercept.bumpless_time", i.bumpless_time);
+  i.bumpless_close_speed = n.declare_parameter("intercept.bumpless_close_speed", i.bumpless_close_speed);
   return i;
 }
 

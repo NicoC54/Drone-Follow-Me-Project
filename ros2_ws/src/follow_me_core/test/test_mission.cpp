@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "follow_me_core/controller.hpp"
 #include "follow_me_core/intercept_sim.hpp"
 #include "follow_me_core/mission.hpp"
 
@@ -90,4 +91,32 @@ TEST(Mission, HandoverHoldGrowsWithRangeUncertainty) {
   // 0.4 m target: resolved (20 px) at 8 m -> hold_min 12 m.
   EXPECT_GT(closing(0.5), 0.1);          // max(12, 4 + 3 + 3 x 0.5) = 12 m < 16 m: closes in
   EXPECT_NEAR(closing(4.0), 0.0, 1e-9);  // max(12, 4 + 3 + 3 x 4) = 19 m > 16 m: holds
+}
+
+// Bumpless transfer (journal n°29): the follower arrives in front of the target, the hand-over law
+// pulls it one way, the follow law the other. Entering FOLLOW must not make the acceleration
+// command jump in one step (Gazebo: 4.5-9.8 m/s^2 before, 0.4-0.7 after).
+TEST(Mission, EnteringFollowDoesNotStepTheCommand) {
+  auto max_step = [](double bumpless_tau) {
+    InterceptParams ip;
+    ip.bumpless_tau = bumpless_tau;
+    MissionManager mm(ip, GuidanceParams{});
+    PositionController ctl(ControlParams{}, 6.0, 14.0);
+    const double dt = 0.01;
+    Vec3 p(0, 0, 40), v(0, -6, 0);  // 15 m in front of a target flying +x, moving sideways
+    const Vec3 p_t(-15, 0, 42), v_t(8, 0, 0);
+    Vec3 a_prev = Vec3::Zero();
+    double step = 0.0;
+    for (int k = 0; k < 200; ++k) {
+      const bool locked = k >= 100;  // camera lock at 1 s: HANDOVER -> FOLLOW
+      const auto out = mm.update({k * dt, p, v, true, locked, p_t + v_t * (k * dt), v_t, 0.6, 0.3}, dt);
+      const Vec3 a = ctl.compute(p, v, out.p_des, out.v_des, dt, out.v_max, Vec3::Zero(), out.v_rel_max,
+                                 out.v_cmd_tau);
+      if (k >= 99 && k <= 101) step = std::max(step, (a - a_prev).norm());
+      a_prev = a;  // kinematics frozen: only the command's own continuity is tested
+    }
+    return step;
+  };
+  EXPECT_GT(max_step(-1.0), 2.0);  // without: the command jumps at the switch (3 m/s^2 here)
+  EXPECT_LT(max_step(0.8), 1.0);   // with: continuous
 }

@@ -82,6 +82,26 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
     }
   }
 
+  if (phase_ != last_phase_) {
+    last_phase_ = phase_;
+    t_phase_change_ = in.t;
+  }
+  Output out = setpoint(in, dt);
+  if (ip_.transition_jerk > 0.0 && in.t - t_phase_change_ < ip_.transition_time)
+    out.jerk_max = out.jerk_max > 0.0 ? std::min(out.jerk_max, ip_.transition_jerk) : ip_.transition_jerk;
+  const double since = in.t - t_phase_change_;
+  // Only on entering FOLLOW: applied at every phase change, it also altered the MIDCOURSE -> HANDOVER
+  // approach (offline run 142: hand-over closing at 5.5 m/s at 13 m, minimum 3.96 m).
+  if (ip_.bumpless_tau > 0.0 && since < ip_.bumpless_time && phase_ == MissionPhase::Follow) {
+    out.v_cmd_tau = ip_.bumpless_tau * (1.0 - since / ip_.bumpless_time);
+    if (ip_.bumpless_close_speed > 0.0)
+      out.v_rel_max = out.v_rel_max > 0.0 ? std::min(out.v_rel_max, ip_.bumpless_close_speed) : ip_.bumpless_close_speed;
+  }
+  return out;
+}
+
+MissionManager::Output MissionManager::setpoint(const Input& in, double dt) {
+  const double range = (in.p_t - in.p_f).norm();
   // ---- setpoint of the phase ----
   Output out;
   out.phase = phase_;
@@ -134,6 +154,7 @@ MissionManager::Output MissionManager::update(const Input& in, double dt) {
       out.a_ff = ip_.a_ff_gain * in.a_t;
       out.a_max = ip_.follow_a_max;
       out.jerk_max = ip_.follow_jerk_max;
+      out.v_rel_max = ip_.follow_close_speed;
       return out;
     }
   }

@@ -3,12 +3,14 @@
 //   -> position control (speed limit per phase) -> safety filter -> flight-controller setpoint.
 //   The gimbal is pointed at the target estimate (radar cueing before the camera lock).
 // Inputs : /target/estimate (fusion_node), /follower/odom (navigation), /follower/joint_states.
-// Outputs: /follower/fc/accel_yaw_setpoint, gimbal commands, /mission/phase, markers.
+// Outputs: /follower/fc/accel_yaw_setpoint, gimbal commands, /mission/phase, markers,
+//          /mission/debug (setpoint, command before / after the safety filter: diagnosis).
 #include <follow_me_msgs/msg/target_estimate.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <optional>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
@@ -46,6 +48,7 @@ class InterceptNode : public rclcpp::Node {
     pub_pitch_ = create_publisher<std_msgs::msg::Float64>("/follower/gimbal/pitch_cmd", 10);
     pub_phase_ = create_publisher<std_msgs::msg::String>("/mission/phase", 10);
     pub_mk_ = create_publisher<visualization_msgs::msg::MarkerArray>("/follow/markers", 10);
+    pub_dbg_ = create_publisher<std_msgs::msg::Float64MultiArray>("/mission/debug", 10);
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(0.01), [this] { tick(); });
   }
 
@@ -86,7 +89,16 @@ class InterceptNode : public rclcpp::Node {
     pub_phase_->publish(std_msgs::msg::String().set__data(follow_me::toString(out.phase)));
 
     // ---- control + safety ----
-    Vec3 a_cmd = controller_.compute(odom_->p, odom_->v, out.p_des, out.v_des, dt, out.v_max);
+    Vec3 a_cmd = controller_.compute(odom_->p, odom_->v, out.p_des, out.v_des, dt, out.v_max, Vec3::Zero(), out.v_rel_max,
+                                     out.v_cmd_tau);
+    if (out.a_max > 0) a_cmd = follow_me::saturate(a_cmd, out.a_max);
+    if (out.jerk_max > 0) {  // bumpless phase transitions (and optional smooth follow), before safety
+      jerk_.setMax(out.jerk_max);
+      a_cmd = jerk_.apply(a_cmd, dt);
+    } else {
+      jerk_.reset(a_cmd);
+    }
+    const Vec3 a_ctrl = a_cmd;
     bool safety_active = false;
     if (has_track) {
       const auto r = safety_.filter(a_cmd, odom_->p, odom_->v, p_t, v_t, P);
@@ -94,6 +106,13 @@ class InterceptNode : public rclcpp::Node {
       safety_active = r.active;
     }
     a_cmd = follow_me::saturate(a_cmd, fol_.a_max);
+    {  // diagnosis: t, phase, p_des, v_des, v_max, command before / after the safety filter, active
+      std_msgs::msg::Float64MultiArray dbg;
+      dbg.data = {now, double(static_cast<int>(out.phase)), out.p_des.x(), out.p_des.y(), out.p_des.z(),
+                  out.v_des.x(), out.v_des.y(), out.v_des.z(), out.v_max, a_ctrl.x(), a_ctrl.y(), a_ctrl.z(),
+                  a_cmd.x(), a_cmd.y(), a_cmd.z(), safety_active ? 1.0 : 0.0};
+      pub_dbg_->publish(dbg);
+    }
 
     // ---- heading + gimbal: look at the target (radar cueing before the camera lock) ----
     double yaw_sp = hold_yaw_ ? *hold_yaw_ : odom_->yaw;
@@ -243,6 +262,7 @@ class InterceptNode : public rclcpp::Node {
   follow_me::MissionManager mission_;
   follow_me::PositionController controller_;
   follow_me::SafetyFilter safety_;
+  follow_me::JerkLimiter jerk_{-1.0};
   Vec3 cam_offset_;
   double size_known_rel_;
   std::optional<follow_me_ros::OdomState> odom_;
@@ -260,6 +280,7 @@ class InterceptNode : public rclcpp::Node {
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_yaw_, pub_pitch_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_phase_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_mk_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_dbg_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

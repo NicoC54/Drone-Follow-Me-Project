@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <deque>
 #include <algorithm>
+#include <optional>
 #include <fstream>
 #include <vector>
 #include <random>
@@ -108,6 +109,10 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
   double next_frame = 0.0, hold_yaw = 0.0, t_follow_start = -1.0;
   double s_derr2 = 0, s_eerr2 = 0, s_nees = 0, s_hnees = 0;
   std::vector<double> follow_acc, follow_tilt;
+  // Swing rate of the thrust axis in FOLLOW (entry included) [deg/s]: what the eye sees as a
+  // "jumping" drone (Gazebo 2026-11-19: reversals of 60 deg in 0.4 s).
+  std::vector<double> follow_swing;
+  std::optional<Vec3> prev_thrust_axis;
   double s_rerr2 = 0, s_rerr2_h = 0;
   int n_radar_phase = 0;
   int n_hand = 0;
@@ -116,8 +121,11 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
   double last_detection_t = -1.0;
 
   // ---- optional logs (figures, GIF, web replay) ----
-  std::ofstream log, radar_log;
+  std::ofstream log, radar_log, ctrl_log;
   if (!cfg.out_dir.empty()) {
+    ctrl_log.open(cfg.out_dir + "/control.csv");
+    ctrl_log << "t,phase,pdx,pdy,pdz,vdx,vdy,vdz,vmax,px,py,pz,vx,vy,vz,acx,acy,acz,ax,ay,az,safety,"
+                "tx,ty,tz,tvx,tvy,tvz\n";
     log.open(cfg.out_dir + "/intercept.csv");
     radar_log.open(cfg.out_dir + "/radar.csv");
     log << "t,phase,lx,ly,lz,fx,fy,fz,qw,qx,qy,qz,nx,ny,nz,ex,ey,ez,evx,evy,evz,"
@@ -197,7 +205,8 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
     }
     if (out.phase == MissionPhase::Follow && m.t_follow < 0) m.t_follow = t;
     Vec3 a_cmd = controller.compute(follower.position(), follower.velocity(), out.p_des, out.v_des,
-                                    dt, out.v_max, out.a_ff);
+                                    dt, out.v_max, out.a_ff, out.v_rel_max,
+                                    out.v_cmd_tau);
     if (out.a_max > 0) a_cmd = saturate(a_cmd, out.a_max);
     if (out.jerk_max > 0) {
       jerk.setMax(out.jerk_max);
@@ -205,15 +214,29 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
     } else {
       jerk.reset(a_cmd);  // seamless entry into FOLLOW
     }
+    const Vec3 a_ctrl = a_cmd;  // before the safety filter (control log)
+    bool safety_active = false;
     if (has_track) {
-      a_cmd = safety.filter(a_cmd, follower.position(), follower.velocity(), est.position(),
-                            est.velocity(), est.positionCov()).a;
+      const auto sf = safety.filter(a_cmd, follower.position(), follower.velocity(), est.position(),
+                                    est.velocity(), est.positionCov());
+      a_cmd = sf.a;
+      safety_active = sf.active;
       const auto [yaw_g, pitch_g] = lookAt(follower.truePosition(), est.position());
       gimbal.point(yaw_g, pitch_g, dt);  // cueing: the radar track points the camera
     } else {
       gimbal.sweep(dt);
     }
     a_cmd = saturate(a_cmd, b.follower.a_max);
+    if (ctrl_log.is_open()) {  // every step: what the guidance asked, what the safety filter changed
+      const Vec3 p = follower.position(), v = follower.velocity();
+      ctrl_log << t << ',' << static_cast<int>(out.phase) << ',' << out.p_des.x() << ',' << out.p_des.y() << ','
+               << out.p_des.z() << ',' << out.v_des.x() << ',' << out.v_des.y() << ',' << out.v_des.z() << ','
+               << out.v_max << ',' << p.x() << ',' << p.y() << ',' << p.z() << ',' << v.x() << ',' << v.y() << ','
+               << v.z() << ',' << a_ctrl.x() << ',' << a_ctrl.y() << ',' << a_ctrl.z() << ',' << a_cmd.x() << ','
+               << a_cmd.y() << ',' << a_cmd.z() << ',' << safety_active << ',' << est.position().x() << ','
+               << est.position().y() << ',' << est.position().z() << ',' << est.velocity().x() << ','
+               << est.velocity().y() << ',' << est.velocity().z() << '\n';
+    }
     double yaw_des = hold_yaw;
     if (has_track) {
       yaw_des = std::atan2(est.position().y() - follower.position().y(),
@@ -242,6 +265,10 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
       ++n_hand;
     }
     if (out.phase == MissionPhase::Follow) {
+      const Vec3 zb = follower.trueAttitude() * Vec3::UnitZ();
+      if (prev_thrust_axis)
+        follow_swing.push_back(rad2deg(std::acos(std::clamp(zb.dot(*prev_thrust_axis), -1.0, 1.0))) / dt);
+      prev_thrust_axis = zb;
       ++n_follow;
       if (t_follow_start < 0) t_follow_start = t;
       if (t - t_follow_start > settle) {
@@ -257,6 +284,7 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
       }
     } else {
       t_follow_start = -1.0;
+      prev_thrust_axis.reset();
     }
 
     if (log.is_open() && k % 10 == 0) {  // 10 Hz
@@ -296,6 +324,13 @@ InterceptMetrics runInterceptSim(const InterceptConfig& cfg) {
   m.radar_phase_err_v = std::sqrt(std::max(s_rerr2 - s_rerr2_h, 0.0) / std::max(n_radar_phase, 1));
   m.follow_acc_p95 = p95(follow_acc);
   m.follow_tilt_p95 = p95(follow_tilt);
+  if (!follow_swing.empty()) {
+    std::vector<double> v = follow_swing;
+    const size_t k99 = static_cast<size_t>(0.99 * (v.size() - 1));
+    std::nth_element(v.begin(), v.begin() + static_cast<long>(k99), v.end());
+    m.follow_swing_p99 = v[k99];
+    m.follow_swing_max = *std::max_element(follow_swing.begin(), follow_swing.end());
+  }
   m.follow_pct = 100.0 * n_follow / n_steps;
   m.size_est = tracker.sizeEstimate();
   m.size_sigma = tracker.sizeSigma();
@@ -330,7 +365,8 @@ void runInterceptMonteCarlo(int n, std::uint64_t seed0, const std::string& csv_p
   std::ofstream csv(csv_path);
   csv << "run,seed,wind,radar_latency,clutter,target_size,initial_range,t_track,t_lock,t_follow,"
          "min_distance,time_below_dmin,follow_dist_err_rms,follow_est_err_rms,follow_pct,size_est,follow_nees,"
-         "t_min_distance,phase_min_distance,handover_nees,follow_acc_p95,follow_tilt_p95,radar_phase_err_rms,radar_phase_err_h,radar_phase_err_v\n";
+         "t_min_distance,phase_min_distance,handover_nees,follow_acc_p95,follow_tilt_p95,radar_phase_err_rms,radar_phase_err_h,radar_phase_err_v,"
+         "follow_swing_p99,follow_swing_max\n";
   for (int i = 0; i < n; ++i) {
     double wind = 0;
     const InterceptConfig cfg = monteCarloConfig(i, seed0, maneuver_level, &wind, tweak);
@@ -342,7 +378,7 @@ void runInterceptMonteCarlo(int n, std::uint64_t seed0, const std::string& csv_p
         << m.follow_pct << ',' << m.size_est << ',' << m.follow_nees << ',' << m.t_min_distance << ','
         << m.phase_min_distance << ',' << m.handover_nees << ',' << m.follow_acc_p95 << ','
         << m.follow_tilt_p95 << ',' << m.radar_phase_err_rms << ',' << m.radar_phase_err_h << ','
-        << m.radar_phase_err_v << '\n';
+        << m.radar_phase_err_v << ',' << m.follow_swing_p99 << ',' << m.follow_swing_max << '\n';
     if ((i + 1) % 25 == 0) std::printf("  %d / %d runs\n", i + 1, n);
   }
 }
@@ -367,7 +403,8 @@ void printInterceptMetrics(const InterceptMetrics& m, double target_size) {
   std::printf("  target NEES in HANDOVER          %8.2f\n", m.handover_nees);
   std::printf("  estimate error, radar phases     %8.2f m (horizontal %.2f, vertical %.2f)\n",
               m.radar_phase_err_rms, m.radar_phase_err_h, m.radar_phase_err_v);
-  std::printf("  FOLLOW smoothness: |a_cmd| p95 %.2f m/s^2, tilt p95 %.1f deg\n", m.follow_acc_p95, m.follow_tilt_p95);
+  std::printf("  FOLLOW smoothness: |a_cmd| p95 %.2f m/s^2, tilt p95 %.1f deg, swing p99 %.0f / max %.0f deg/s\n",
+              m.follow_acc_p95, m.follow_tilt_p95, m.follow_swing_p99, m.follow_swing_max);
   if (m.target_max_tilt > 0) std::printf("  target max tilt [deg]            %8.1f\n", m.target_max_tilt);
   std::printf("  min distance [m]                 %8.2f  (t = %.1f s, phase %s)\n", m.min_distance,
               m.t_min_distance, toString(static_cast<MissionPhase>(m.phase_min_distance)));

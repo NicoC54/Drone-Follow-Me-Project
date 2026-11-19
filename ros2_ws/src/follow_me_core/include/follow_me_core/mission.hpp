@@ -53,6 +53,30 @@ struct InterceptParams {
   double follow_a_max = -1.0;     // [m/s^2] (3.0 = ~17 deg tilt)
   double follow_jerk_max = -1.0;  // [m/s^3]
   double lock_lost_time = 3.0;    // FOLLOW without camera for this long -> back to HANDOVER [s]
+  // Bumpless transfer between phases: for transition_time after a phase change, the nominal
+  // acceleration may only change at transition_jerk (the safety filter keeps its full authority).
+  // Measured 2026-11-19: at HANDOVER -> FOLLOW the two guidance laws aim at different points; a
+  // follower that arrived in front of the target was pulled one way, then the other: the command
+  // jumped by 12 m/s^2 in ONE step (thrust axis swung 60 deg in 0.4 s in Gazebo).
+  // Measured in Gazebo: it only DELAYED the problem: the position error to the follow point grew
+  // during the limited second, then the follower charged at 14 m/s, came within 5.9 m, braked hard
+  // and lost the target from the camera (2 runs out of 2). Off; see follow_close_speed.
+  double transition_jerk = -1.0;  // [m/s^3] (< 0: off)
+  double transition_time = 1.5;   // [s]
+  // FOLLOW: closing speed on the follow point limited relative to the target (like the hand-over's
+  // +4 m/s). Without it the correction 0.8 (p_des - p) was bounded by the absolute 14 m/s only: a
+  // follower that entered FOLLOW 20 m from its follow point asked for target + 16 m/s, overshot and
+  // reversed at full tilt. In steady follow the error is < 1 m: the limit never acts.
+  // Measured 2026-11-19: neutral offline (300 runs x 3 levels), Gazebo: no fewer tilt reversals
+  // (9 vs 8), distance error 1.10 -> 1.55 m. Off by default, kept as an option.
+  double follow_close_speed = -1.0;  // [m/s] (< 0: off)
+  // Bumpless transfer (2026-11-19): after a phase change, the controller's velocity command starts
+  // from its previous value and joins the new law with a time constant decaying from
+  // bumpless_tau to 0 over bumpless_time; meanwhile the closing speed on the setpoint is limited
+  // to bumpless_close_speed (no charge towards a follow point 20 m away).
+  double bumpless_tau = 0.8;          // [s] (< 0: off)
+  double bumpless_time = 2.0;         // [s]
+  double bumpless_close_speed = 4.0;  // [m/s]
 };
 
 enum class MissionPhase : std::uint8_t { Wait = 0, Midcourse = 1, Handover = 2, Follow = 3, Lost = 4 };
@@ -95,8 +119,11 @@ class MissionManager {
     Vec3 a_ff = Vec3::Zero();   // acceleration feed-forward for the position controller
     double a_max = -1.0;        // nominal acceleration cap for this phase (< 0: none)
     double jerk_max = -1.0;     // nominal jerk limit for this phase (< 0: none)
+    double v_rel_max = -1.0;    // limit of the position correction kp (p_des - p) [m/s] (< 0: none)
+    double v_cmd_tau = -1.0;    // bumpless transfer: smoothing of the velocity command [s] (< 0: none)
   };
   Output update(const Input& in, double dt);
+  Output setpoint(const Input& in, double dt);  // the phase's guidance (update = transitions + this)
   MissionPhase phase() const { return phase_; }
 
  private:
@@ -105,6 +132,8 @@ class MissionManager {
   GuidanceParams gp_;
   MissionPhase phase_ = MissionPhase::Wait;
   double t_lock_ok_ = -1e9;
+  MissionPhase last_phase_ = MissionPhase::Wait;
+  double t_phase_change_ = -1e9;
   std::optional<Vec3> hold_;
   std::optional<Vec3> v_cmd_;  // filtered velocity command (MIDCOURSE / HANDOVER)
 };

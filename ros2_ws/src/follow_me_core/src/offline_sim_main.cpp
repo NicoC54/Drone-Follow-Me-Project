@@ -80,7 +80,9 @@ int main(int argc, char** argv) {
   for (const auto& kv : sets) {
     static const char* known[] = {"fusion.model", "fusion.q_calm", "fusion.q_jerk", "fusion.singer_tau",
                                   "fusion.q_accel", "intercept.a_ff_gain", "intercept.follow_a_max",
-                                  "intercept.follow_jerk_max", "radar.count", "radar.third"};
+                                  "intercept.follow_jerk_max", "intercept.transition_jerk",
+                                  "intercept.transition_time", "intercept.follow_close_speed",
+                                  "intercept.bumpless_tau", "intercept.bumpless_time", "intercept.bumpless_close_speed", "radar.count", "radar.third"};
     if (std::none_of(std::begin(known), std::end(known), [&](const char* k) { return kv.first == k; })) {
       std::fprintf(stderr, "unknown --set key %s\n", kv.first.c_str());
       return 1;
@@ -100,6 +102,12 @@ int main(int argc, char** argv) {
       else if (k == "intercept.a_ff_gain") c.intercept.a_ff_gain = std::stod(v);
       else if (k == "intercept.follow_a_max") c.intercept.follow_a_max = std::stod(v);
       else if (k == "intercept.follow_jerk_max") c.intercept.follow_jerk_max = std::stod(v);
+      else if (k == "intercept.transition_jerk") c.intercept.transition_jerk = std::stod(v);
+      else if (k == "intercept.transition_time") c.intercept.transition_time = std::stod(v);
+      else if (k == "intercept.follow_close_speed") c.intercept.follow_close_speed = std::stod(v);
+      else if (k == "intercept.bumpless_tau") c.intercept.bumpless_tau = std::stod(v);
+      else if (k == "intercept.bumpless_time") c.intercept.bumpless_time = std::stod(v);
+      else if (k == "intercept.bumpless_close_speed") c.intercept.bumpless_close_speed = std::stod(v);
       else if (k == "radar.count") {  // 2: second radar at (450, -100, 3), same draws as the first
         c.extra_radars.clear();
         if (std::stoi(v) >= 2) c.extra_radars.push_back(follow_me::InterceptConfig::secondRadarSite(c.radar));

@@ -18,13 +18,20 @@ class PositionController {
   void reset() { integral_.setZero(); }
   // v_max_override > 0: speed limit for this call (mission phases), otherwise v_max.
   // a_ff: acceleration feed-forward (e.g. the target's estimated acceleration while following it).
+  // v_rel_max > 0: the position correction kp (p_des - p) is limited to this speed, i.e. the
+  // follower closes on a moving setpoint at most v_rel_max faster than the setpoint moves.
+  // v_cmd_tau > 0: bumpless transfer. The velocity command starts from its previous value and
+  // reaches the new law's with this time constant (the mission lets it decay to 0 after a phase
+  // change): the acceleration command is continuous although the guidance law switched.
   Vec3 compute(const Vec3& p, const Vec3& v, const Vec3& p_des, const Vec3& v_des, double dt,
-               double v_max_override = -1.0, const Vec3& a_ff = Vec3::Zero());
+               double v_max_override = -1.0, const Vec3& a_ff = Vec3::Zero(), double v_rel_max = -1.0,
+               double v_cmd_tau = -1.0);
 
  private:
   ControlParams p_;
   double a_max_, v_max_;
   Vec3 integral_ = Vec3::Zero();
+  std::optional<Vec3> v_cmd_prev_;  // last velocity command (bumpless transfer)
 };
 
 // Last layer before the motors. Works on the ESTIMATED leader position, made conservative by

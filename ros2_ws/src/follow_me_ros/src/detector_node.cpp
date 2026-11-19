@@ -180,7 +180,7 @@ class DetectorNode : public rclcpp::Node {
       // X shape varies by ~30 % (narrow from behind, wide along a diagonal). Gazebo phase 4: the
       // apparent size followed the target's relative yaw (+17 % at 32 deg), a SLOW error that
       // biased the range by 1-2 m. Size = 4 x horizontal standard deviation of the blob pixels.
-      double sw = 0, sx = 0, sxx = 0;
+      double sw = 0, sx = 0, sxx = 0, sy = 0, syy = 0;
       for (int yy = y; yy < y + hh; ++yy)
         for (int xx = x; xx < x + w; ++xx) {
           const int lab = labels.at<int>(yy, xx);
@@ -188,9 +188,14 @@ class DetectorNode : public rclcpp::Node {
             sw += 1;
             sx += xx;
             sxx += double(xx) * xx;
+            sy += yy;
+            syy += double(yy) * yy;
           }
         }
-      if (sw > 0) det.size = 4.0 * std::sqrt(std::max(sxx / sw - (sx / sw) * (sx / sw), 0.0) + 1.0 / 12.0);
+      if (sw > 0) {
+        det.size = 4.0 * std::sqrt(std::max(sxx / sw - (sx / sw) * (sx / sw), 0.0) + 1.0 / 12.0);
+        det.thickness = 4.0 * std::sqrt(std::max(syy / sw - (sy / sw) * (sy / sw), 0.0) + 1.0 / 12.0);
+      }
     }
     const bool on_image_border = r.x + x <= 1 || r.y + y <= 1 || r.x + x + w >= rgb.cols - 1 ||
                                  r.y + y + hh >= rgb.rows - 1;
