@@ -105,7 +105,7 @@ tools/record_grid.py compose out/demo2 docs/media/demo2.gif --title "Situation 2
 
 ## The four phases
 
-The project grew in four phases (each one documented in the [course](cours/00_INDEX.md), French):
+The project grew in four phases (each one recorded in [DESIGN.md](../DESIGN.md)):
 1. Python sandbox: camera on a red beacon, EKF, guidance, control, safety filter.
 2. C++ / ROS 2 / Gazebo: the same algorithms on real rendered images.
 3. Real quadrotor: own flight controller (Gazebo plugin) + 15-state ESKF navigation.
@@ -122,6 +122,3 @@ truth (leader + follower)                                    vehicles.py
    -> control: cascaded P/PI + separation safety filter      control.py
    -> follower point-mass dynamics (lag, drag, wind, gusts)  vehicles.py
 ```
-Learning sheets (French): [UNDERSTANDING.md](UNDERSTANDING.md) (GNC principles),
-[UNDERSTANDING_ROS.md](UNDERSTANDING_ROS.md) (C++ / ROS 2 / Gazebo),
-[UNDERSTANDING_FLIGHT.md](UNDERSTANDING_FLIGHT.md) (quadrotor, flight controller, navigation).

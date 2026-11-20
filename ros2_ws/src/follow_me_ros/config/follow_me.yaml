@@ -45,7 +45,7 @@
       pitch_max_deg: 40.0     # = gimbal_pitch joint upper limit in the SDF (airframe out of view)
 
     # Detector calibration: the raw enclosing-circle diameter is ~0.3 px too large
-    # (anti-aliased edges). Measured against the ground truth, see docs/UNDERSTANDING_ROS.md.
+    # (anti-aliased edges). Measured against the ground truth (DESIGN.md).
     size_bias_px: 0.3
 
     # Fault injection in the detector (0 = pure vision). Try p_outlier: 0.02 to test gating.

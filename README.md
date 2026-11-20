@@ -25,8 +25,7 @@ over-confident against a target as agile as the follower (a known limit).
 **▶ [1-minute video](docs/media/demo.mp4)** (an earlier scripted flight, hexacopter).*
 
 **[Interactive 3D replay](https://nicoc54.github.io/Drone-Follow-Me-Project/replay/)** ·
-**[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)** ·
-**[Course (FR)](docs/cours/00_INDEX.md)**
+**[Results](docs/RESULTS.md)** · **[Usage](docs/USAGE.md)** · **[Design decisions](DESIGN.md)**
 
 ## What is built from scratch
 
